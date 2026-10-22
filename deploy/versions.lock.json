@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "ragflow": {"repository": "https://github.com/infiniflow/ragflow.git", "revision": "e2401e54947db7eb5e542b6de26755d89886f783", "bridge_version": "1.0", "runtime_verified": false},
+  "local_embedding": {"model": "qwen3-embedding:0.6b", "dimension": 1024, "observed_digest": "ac6da0dfba84a81fdbfbaf330198c33cd77c4cdfc53e8bc50eb581914a15621d"},
+  "observed_postgresql": {"major": 17, "pgvector": "0.8.6", "age": "1.7.0"},
+  "python_dependencies": "requirements.lock",
+  "frontend_dependencies": "frontend/pnpm-lock.yaml"
+}

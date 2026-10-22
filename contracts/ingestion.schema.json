@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "企业来源文件流预留契约",
+  "description": "首期仅manual/raw摄入；企业ACL/OBS连接器尚未实现。workspace由服务端授权确定。",
+  "type": "object",
+  "required": ["source_id", "external_document_id", "source_revision", "file_name"],
+  "properties": {
+    "source_id": {"type":"string","minLength":1,"maxLength":100},
+    "external_document_id": {"type":"string","minLength":1,"maxLength":1000},
+    "source_revision": {"type":"string","minLength":1,"maxLength":200},
+    "file_name": {"type":"string","minLength":1,"maxLength":255},
+    "expected_sha256": {"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "acl_ref": {"type":["string","null"]},
+    "acl_revision": {"type":["string","null"]},
+    "metadata": {"type":"object"}
+  },
+  "additionalProperties": false
+}

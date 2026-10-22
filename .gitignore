@@ -16,3 +16,8 @@ test-results/
 playwright-report/
 *.log
 .superpowers/
+*.egg-info/
+*.docx
+
+.pnpm-store/
+.npm-cache/

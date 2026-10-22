@@ -3,8 +3,8 @@ import io
 
 import pytest
 
-from raglab.persistence import Store, BlobStore
 from raglab.parsing import parse_local
+from raglab.persistence import BlobStore, Store
 
 
 def test_records_are_scoped_and_blobs_content_addressed(tmp_path):

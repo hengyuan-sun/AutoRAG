@@ -8,11 +8,28 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import (JSON, Column, Float, Integer, MetaData, String, Table,
-                        UniqueConstraint, and_, create_engine, delete, insert, or_, select, text, update)
+from sqlalchemy import (
+    JSON,
+    Column,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    UniqueConstraint,
+    and_,
+    create_engine,
+    delete,
+    insert,
+    or_,
+    select,
+    text,
+    update,
+)
 
 
 def uid():
@@ -31,6 +48,7 @@ class Store:
         self.pg = self.engine.dialect.name == "postgresql"
         self.dimension = dimension
         self.lock = threading.RLock()
+        self._job_context = threading.local()
         meta = MetaData()
         self.records = Table("lab_records", meta, Column("id", String(32), primary_key=True),
                              Column("workspace", String(80), nullable=False, index=True),
@@ -67,6 +85,7 @@ class Store:
         values = {"id": uid(), "kind": kind, "workspace": workspace, "data": data,
                   "key": key, "created": time.time(), "version": 0}
         with self.engine.begin() as c:
+            self._assert_job_fence(c)
             c.execute(insert(self.records).values(**values))
         return self.get(values["id"], workspace)
 
@@ -96,6 +115,7 @@ class Store:
     def replace(self, id, workspace, data):
         self.get(id, workspace)
         with self.engine.begin() as c:
+            self._assert_job_fence(c)
             c.execute(update(self.records).where(self.records.c.id == id, self.records.c.workspace == workspace)
                       .values(data=data, version=self.records.c.version+1))
         return self.get(id, workspace)
@@ -169,12 +189,36 @@ class Store:
             if len(vec) != self.dimension or not all(math.isfinite(x) for x in vec):
                 raise ValueError("向量维度或数值不合法")
         with self.engine.begin() as c:
+            self._assert_job_fence(c)
             c.execute(delete(self.vectors).where(self.vectors.c.workspace == workspace,
                                                self.vectors.c.index_id == index_id))
             if chunks:
                 c.execute(insert(self.vectors), [{"id": f"{index_id}:{chunk['id']}", "workspace": workspace,
                           "index_id": index_id, "chunk": chunk, "embedding": vec}
                           for chunk, vec in zip(chunks, vectors, strict=True)])
+
+    @contextmanager
+    def job_scope(self, job_id, owner, fence):
+        """将当前线程的资源写入绑定到仍有效的任务租约。"""
+        previous = getattr(self._job_context, "identity", None)
+        self._job_context.identity = (job_id, owner, fence)
+        try:
+            yield
+        finally:
+            self._job_context.identity = previous
+
+    def _assert_job_fence(self, conn):
+        identity = getattr(self._job_context, "identity", None)
+        if identity is None:
+            return
+        job_id, owner, fence = identity
+        q = select(self.jobs).where(self.jobs.c.id == job_id, self.jobs.c.owner == owner,
+                                    self.jobs.c.fence == fence, self.jobs.c.status == "RUNNING",
+                                    self.jobs.c.lease >= time.time())
+        if self.pg:
+            q = q.with_for_update()
+        if conn.execute(q).first() is None:
+            raise ValueError("任务租约失效，拒绝旧Worker提交")
 
     def search_vectors(self, workspace, index_id, vector, limit):
         if len(vector) != self.dimension or not all(math.isfinite(x) for x in vector):

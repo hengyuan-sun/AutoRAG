@@ -35,7 +35,8 @@ lab_jobs保存任务、lease和fencing token；lab_vectors在PostgreSQL上使用
 BlobStore流式接收、累计SHA256及大小，临时文件完整写入后原子更名，超限/失败清理临时文件。
 Blob读路径只接受64位hex，防止目录穿越。外部访问产物必须先由业务层检查资源workspace。
 
-任务通过事务和行锁领取；旧租约不能提交。发布指针使用CAS比较expected_release，
+任务通过事务和行锁领取；资源和向量的每次事务写入都会锁定并核对当前job owner、fencing token和租约，
+旧Worker即使恢复运行也不能保存评测/Trial或覆盖索引。发布指针使用CAS比较expected_release，
 只有符合当前活动版本的写入可成功。测试覆盖跨工作区拒绝、幂等、旧Worker与并发发布语义。
 
 ## 四 解析身份
@@ -49,5 +50,90 @@ RAGFlow适配调用配置的`/internal/v1/parse`内部桥接，校验revision、
 
 ## 五 开发验证状态
 
-模块M1/M2已通过19项本地单元测试（初次RED共19项，随后实现转GREEN）。
-后续实验、API、前端及外部服务结果将追加到本文，不把计划测试算作已执行。
+后端默认套件36项通过、1项真实依赖用例默认跳过；启用集成环境后，真实Ollama与PostgreSQL/pgvector链路1项通过。
+前端Vitest 1项通过，Playwright完整闭环1项通过，Vue类型检查及Vite生产构建通过，Ruff静态检查通过。
+评审回归覆盖失效租约写入、旧模型身份、文档TopK以及黄金集嵌套字段校验。
+
+## 六 领域服务和三个闭环
+
+`service.py`的Lab是API与Worker共享的领域入口。资源操作均接收workspace，
+外部HTTP单机身份固定为local，客户端不能通过自报workspace越权。
+
+摄入先检查知识库，再流式存储。业务身份由知识库/来源/外部文档ID区分，修订作为独立键；
+相同修订相同hash返回原资源，不同hash返回409。未显式指定修订时，人工上传采用内容hash。
+当前文档清单按每个逻辑身份最新接收的修订生成，企业来源事件排序策略尚待连接器实现。
+
+实验创建不可变配置与模型绑定，逐组执行。解析缓存包含文档ID、源hash、解析器身份，
+修改窗口可复用同一解析快照；Embedding缓存包含实际输入、角色与完整模型绑定。
+每个Trial固定文档清单、解析快照hash、切分参数、模型digest及Chunk产物hash。
+数据写入候选index_version；持久化成功后才标READY。不同方案失败独立记录，全部失败则任务失败。
+重试可跳过READY Trial并复用已完成的模型调用；这不是通用DAG阶段检查点系统。
+
+检索检查Trial归属后，按该Trial固定模型生成查询向量。pgvector执行带workspace和index_id过滤的余弦查询。
+全文基线以中文单字/二元词组和英文词条执行BM25，RRF按排名融合。
+块级候选先全量按文档最高分聚合，再生成独立文档TopK用于Recall/MRR/nDCG；
+块级TopK单独装配字符预算上下文。Trace保存两路候选、实际上下文及来源。
+
+`golden.py`定义API与服务共用的GoldenItem/EvidenceSpan契约，JSON/CSV在落库前检查嵌套字段类型。
+黄金集导入检查问题ID、文档版本、知识库归属和区间格式。评测前核对每个span的块和范围，
+不能精确对齐时将该题标记错误；有效题执行失败计零，错误率独立记录。
+无标签指标返回null。总分采用题目宏平均；P95使用nearest-rank。
+完整逐题Trace持久化在evaluation资源中，前端可以展开和导出。
+
+发布时重新冻结知识库当前全部文档清单，用原Trial的切分/解析/模型配置构建完整索引，
+再对候选执行黄金集，文档Recall达到指定门槛且错误率为0才得到READY Release。
+未通过Gate的版本仍保存REJECTED及指标。首期Gate不等价于v3全部多指标/相对基线能力。
+激活/回滚通过expected_release_id执行CAS，模型digest不再可用则拒绝；
+单条查询开始时固定Release，原数据和模型配置不会因默认配置改变而混用。
+
+## 七 模型适配
+
+`models.py`在/api/tags中按绑定内的模型名定位Ollama模型并固定digest，/api/embed使用truncate=false，
+对文档与查询使用不同的角色缓存，查询加入固定检索指令。
+每批新Embedding前核对当前digest，数量、维度、有限数均校验。
+旧缓存只用于相同模型身份及实际输入，不跨工作区共享。
+Reranker尚未启用；模型已安装不等于评分协议已验证。修改默认模型不会使既有Release失效；
+只有原绑定模型被卸载或其digest改变时才拒绝激活或继续检索。
+
+## 八 API与后台任务
+
+`api.py`以FastAPI提供知识库、文件流、实验、评测、发布和检索接口，
+请求采用Pydantic限制长度、枚举与参数组数。401表示无令牌，403只读拒绝，
+404资源不存在或无权限，409幂等/发布冲突，422参数问题，503外部依赖不可用。
+管理员和可选只读令牌在服务端映射身份，不依赖前端控制权限。
+
+单机服务内嵌一个Worker线程；也可用`python -m raglab.worker`运行独立Worker。
+job领取后启动15秒心跳，60秒租约，fencing token保证旧Worker不能提交最终任务状态。
+崩溃后过期任务可重新领取；外部向量写入使用稳定Chunk键和候选索引隔离。
+尚未提供取消任务、后台产物GC和生产级阶段分布式协调，不能将其视为完整调度平台。
+
+raw入口逐个读取请求分片，累计hash及大小后才调用摄入，断流不创建成功资源。
+multipart文件使用上传临时流，超过上限会拒绝。JSON/CSV黄金集导入上限5MB。
+Blob引用必须经业务资源授权后访问，当前没有公开原始Blob下载端点。
+
+## 九 前端实现
+
+`frontend/src/App.vue`按文件试验、黄金评测、版本发布、历史诊断四个工作区组织。
+连接令牌仅保存在sessionStorage，不打包进静态资源；请求通过api.ts统一加鉴权及展示结构化错误。
+长任务返回job_id后轮询持久状态，而非依赖单个HTTP请求一直等待。
+选择Trial加载分页Chunk预览，切换知识库会清空旧选择；异步响应核对当前选择，防止展示过期结果。
+完成通知不被数据加载watcher重置，此问题由真实浏览器测试发现并修复。
+
+评测列表展示文档与证据指标，缺少证据时N/A；逐题页面展开实际上下文与Trace。
+发布页面先完整构建，再由用户点击激活，历史READY版本可显式回滚。
+OBS、Rerank、Token预算在诊断页面标记尚未启用，不能把预留项显示为已运行。
+
+## 十 RAGFlow定制文件
+
+`patches/ragflow-parser-bridge/main.go`在冻结Go模块内复用官方Parser，
+实现带独立令牌的/internal/v1/parse。DOCX要求JSON结构；PDF首期明确plain_text；
+Markdown禁用远程图片下载。TableData映射为行组并保留原始结构，未知页码返回null。
+脚本`scripts/prepare_ragflow.py`检查SHA和干净工作区后应用可复现构建目标改动。
+当前工作站缺少Go工具链和原生库，因此桥接源码尚未完成真实编译/端到端验证，
+API契约测试使用隔离HTTP传输检查字段与拒绝错误revision，不将其称为真实上游测试。
+
+## 十一 已知后续模块
+
+精确Tokenizer、父子/语义算法、公开基准下载适配、完整GatePolicy、OBS/来源ACL、
+Milvus备用路径、产物GC、备份恢复脚本及RAGFlow运行验证继续按v3里程碑推进。
+当前交付是三个本地研发闭环首个可运行版本，不等于v3全范围或生产验收完成。

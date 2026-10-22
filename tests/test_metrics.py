@@ -1,6 +1,6 @@
 import pytest
 
-from raglab.metrics import evidence_metrics, ranking_metrics, rrf, assemble
+from raglab.metrics import assemble, evidence_metrics, ranking_metrics, rrf
 
 
 def span(start, end, block="b", doc="d"):
