@@ -16,6 +16,14 @@ def test_evidence_unique_and_real_cost():
     assert result["redundancy"] == pytest.approx(.2)
 
 
+def test_evidence_metrics_ignore_additional_ir_source_metadata():
+    plain = [span(0, 8, block="ir-paragraph")]
+    enriched = [{**plain[0], "item_uid": "ir-paragraph", "page": 3,
+                 "bbox": [1, 2, 20, 30], "cell_refs": []}]
+
+    assert evidence_metrics(plain, plain, 8) == evidence_metrics(enriched, enriched, 8)
+
+
 def test_equal_words_different_documents_not_hits():
     assert evidence_metrics([span(0, 10)], [span(0, 10, doc="other")], 10)["evidence_recall"] == 0
     assert evidence_metrics([], [], 0)["evidence_recall"] is None

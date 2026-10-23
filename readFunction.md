@@ -52,6 +52,14 @@ Blob读路径只接受64位hex，防止目录穿越。外部访问产物必须�
 
 验证：`tests/test_document_ir_models.py`覆盖1.5核心项类型、JSON往返、位置和证据状态；`tests/test_document_ir_validation.py`覆盖重复UID、悬空关系、越界单元格和非有限坐标。
 
+## DocumentIR到Chunk来源映射
+
+`src/raglab/document_ir/chunk_projection.py`是DocumentIR进入现有切分器的唯一边界。标题、段落和表格生成临时ChunkingBlock；图片/公式继续留在IR，首期不隐式拼入检索文本。每个投影块ID就是稳定IR item UID，保留章节路径、可用页码/bbox、来源位置和字符跨度。表格按行/列序列化为切分文本，同时记录每个单元格在投影字符串中的Unicode码点范围。
+
+`chunk_document`输出的每条来源span都包含document_id、item_uid、block_id和投影文本左闭右开区间，并带上可用位置及相交的cell UID/行列坐标。重叠窗、标题重复和表格表头重复仍指向原IR区间。指标模块只使用document/block/区间字段，额外来源证据不会改变Recall、Precision或IoU。Trial固定parser identity、IR schema版本、解析快照hash和切分参数；解析器或配置变化产生新快照，切分参数扫描复用相同解析结果。
+
+验证：`tests/test_ir_chunk_projection.py`覆盖heading context、表格单元格来源和Unicode精确回链；`tests/test_chunking.py`验证新span保留原解析块身份；`tests/test_metrics.py`保证新增来源字段不改变既有证据指标。
+
 ## 五 解析身份
 
 `src/raglab/document_ir/docling_adapter.py`使用锁定的Docling 2.142.0 Python SDK，将路径文件转为DocumentIR 1.5。

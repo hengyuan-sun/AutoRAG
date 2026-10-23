@@ -18,6 +18,8 @@ def test_all_presets_preserve_source(strategy):
     for c in chunks:
         assert c["text"]
         for span in c["spans"]:
+            assert span["item_uid"] == span["block_id"]
+            assert span["page"] == 1
             assert text[span["start"]:span["end"]] in c["text"]
             covered.update(range(span["start"], span["end"]))
     assert len(covered) == len(text)

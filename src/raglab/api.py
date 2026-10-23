@@ -47,7 +47,7 @@ class Variant(BaseModel):
 class ExperimentBody(BaseModel):
     kb_id: str
     document_ids: list[str] = Field(min_length=1, max_length=500)
-    parser: str = Field(default="local", min_length=1, max_length=40)
+    parser: str = Field(default="docling", min_length=1, max_length=40)
     variants: list[Variant] = Field(min_length=1, max_length=20)
 
 

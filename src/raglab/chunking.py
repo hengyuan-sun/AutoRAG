@@ -71,13 +71,22 @@ def chunk_document(document, strategy, length, overlap):
         def emit(parts):
             body, spans, segments = "", [], []
             for start, end in parts:
-                span = {"document_id": doc_id, "block_id": block["id"], "start": start, "end": end}
+                item_uid = block.get("item_uid", block["id"])
+                cell_refs = [{"item_uid": ref["item_uid"], "cell_uid": ref["cell_uid"],
+                              "row": ref["row"], "col": ref["col"]}
+                             for ref in block.get("cell_spans", [])
+                             if ref["start"] < end and ref["end"] > start]
+                span = {"document_id": doc_id, "block_id": block["id"], "item_uid": item_uid,
+                        "start": start, "end": end, "page": block.get("page"),
+                        "bbox": block.get("bbox"), "locations": block.get("locations", []),
+                        "cell_refs": cell_refs}
                 segments.append({"start": len(body), "end": len(body) + end - start, "span": span})
                 body += text[start:end]
                 spans.append(span)
             identity = f"{doc_id}:{block['id']}:{strategy}:{length}:{overlap}:{parts}"
             chunks.append({"id": hashlib.sha256(identity.encode()).hexdigest()[:32], "text": body,
                            "spans": spans, "segments": segments, "document_id": doc_id,
+                           "item_uid": block.get("item_uid", block["id"]),
                            "page": block.get("page"), "slide": block.get("slide"),
                            "shape_id": block.get("shape_id"), "shape_name": block.get("shape_name"),
                            "position": block.get("position"),

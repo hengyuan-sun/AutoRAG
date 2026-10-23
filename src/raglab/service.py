@@ -10,7 +10,9 @@ from pathlib import Path
 from sqlalchemy.exc import IntegrityError
 
 from .chunking import chunk_document, presets
+from .document_ir.chunk_projection import to_chunking_document
 from .document_ir.docling_adapter import DoclingOptions, DoclingParserAdapter
+from .document_ir.models import DocumentIR
 from .golden import GoldenItem
 from .metrics import assemble, evidence_metrics, ranking_metrics, rrf
 from .models import Ollama
@@ -130,28 +132,41 @@ class Lab:
         return [c["data"]["vector"] for c in cached]
 
     def _build_trial(self, workspace, kb_id, document_ids, parser, config, binding, key):
+        adapter = self.parser_adapters.get(parser)
+        if adapter is None:
+            raise ValueError("未注册所选解析器")
         old = self.store.by_key("trial", workspace, key)
         if old and old["data"]["status"] == "READY":
             return old
         data = {"kb_id": kb_id, "document_ids": document_ids, "parser": parser, "config": config,
+                "parser_identity": adapter.version,
                 "model_binding": binding, "status": "BUILDING", "backend": "pgvector" if self.store.pg else "sqlite-test",
-                "schema_version": 1, "config_hash": digest([config, binding, parser]), "chunker_version": "1.1"}
+                "schema_version": 1, "config_hash": digest([config, binding, parser, adapter.version]),
+                "chunker_version": "1.2"}
         trial = old or self.store.create("trial", workspace, data, key)
-        chunks, snapshots = [], []
+        chunks, snapshots, parse_schemas = [], [], []
         for document_id in document_ids:
             doc = self.store.get(document_id, workspace, "document")
             if doc["data"]["kb_id"] != kb_id:
                 raise ValueError("文档不属于目标知识库")
             parsed = self.parsed(workspace, document_id, parser)
-            snapshots.append(digest(parsed))
-            chunks.extend(chunk_document(parsed, **config))
+            parsed_hash = digest([parsed, adapter.version])
+            snapshots.append(parsed_hash)
+            parse_schema = parsed.get("schema_version", 1)
+            parse_schemas.append(str(parse_schema))
+            if parse_schema == "1.5":
+                ir = DocumentIR.model_validate(parsed)
+                chunks.extend(chunk_document(to_chunking_document(ir, document_id), **config))
+            else:
+                chunks.extend(chunk_document(parsed, **config))
         if not chunks or len(chunks) > 20000:
             raise ValueError("本地首期每个Trial要求1–20000个Chunk")
         vectors = self._embed(workspace, [c["text"] for c in chunks], binding)
         self.store.write_vectors(workspace, trial["id"], chunks, vectors)
         chunk_ref = self.blobs.put(io.BytesIO(json.dumps(chunks, ensure_ascii=False).encode()))
         data.update(status="READY", chunk_ref=chunk_ref, chunk_count=len(chunks),
-                    parse_hashes=snapshots, manifest_hash=digest(document_ids),
+                    parse_hashes=snapshots, parse_schema_versions=parse_schemas,
+                    manifest_hash=digest(document_ids),
                     average_length=sum(len(c["text"]) for c in chunks)/len(chunks))
         return self.store.replace(trial["id"], workspace, data)
 
@@ -176,8 +191,11 @@ class Lab:
         ids, errors = [], []
         for i, config in enumerate(payload["variants"]):
             try:
+                adapter = self.parser_adapters.get(payload["parser"])
+                if adapter is None:
+                    raise ValueError("未注册所选解析器")
                 trial = self._build_trial(workspace, payload["kb_id"], payload["document_ids"], payload["parser"],
-                                          config, binding, digest([key, i]))
+                                          config, binding, digest([key, i, adapter.version, config]))
                 ids.append(trial["id"])
             except (ValueError, http_error_types()) as exc:
                 errors.append({"variant": i, "error": str(exc)[:500]})

@@ -58,6 +58,27 @@ def test_path_parser_receives_streamed_temp_file_and_cache_tracks_parser_version
     assert not Path(seen[-1][1]).exists()
 
 
+def test_docling_experiment_projects_ir_to_chunks_and_pins_parser_identity(lab):
+    kb = lab.create_kb("w", "Docling知识库")
+    doc = lab.ingest("w", kb["id"], "维修.md", io.BytesIO("# 安全检查\n\n检查阀门😀。".encode()),
+                     "manual", "maintenance", "r1")
+    job = lab.store.enqueue("w", "experiment", {
+        "kb_id": kb["id"], "document_ids": [doc["id"]], "parser": "docling",
+        "variants": [{"strategy": "window", "length": 100, "overlap": 0}],
+    }, "docling-ir-trial")
+
+    assert lab.work_once()
+    result = lab.store.get_job(job["id"], "w")
+    assert result["status"] == "SUCCEEDED", result.get("error")
+    trial = lab.store.get(result["result"]["trial_ids"][0], "w", "trial")
+    chunks = lab.chunks("w", trial["id"])
+    assert trial["data"]["parser_identity"].startswith("docling@2.142.0")
+    assert trial["data"]["parse_hashes"]
+    assert [chunk["text"] for chunk in chunks] == ["安全检查", "检查阀门😀。"]
+    assert all(chunk["spans"][0]["item_uid"].startswith("ir_") for chunk in chunks)
+    assert chunks[1]["section_path"] == ["安全检查"]
+
+
 def test_ingest_idempotency_conflict_and_scope(lab):
     kb, doc = setup(lab)
     same = lab.ingest("w", kb["id"], "工艺.txt", io.BytesIO("温度80℃。安全检查合格。".encode()),

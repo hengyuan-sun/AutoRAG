@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_service import TestEmbedder
 
-from raglab.api import create_app
+from raglab.api import ExperimentBody, create_app
 from raglab.config import Settings
 from raglab.service import Lab
 
@@ -86,6 +86,37 @@ def test_multipart_upload_uses_configured_single_file_limit(tmp_path):
 
 def test_default_file_limit_is_500_mib():
     assert Settings().max_file_bytes == 500 * 1024 * 1024
+
+
+def test_new_experiments_default_to_docling_parser():
+    body = ExperimentBody.model_validate({"kb_id": "kb", "document_ids": ["doc"],
+                                          "variants": [{"strategy": "recursive"}]})
+    assert body.parser == "docling"
+
+
+def test_default_docling_experiment_runs_through_ir_chunk_projection(client):
+    c, lab = client
+    c.headers["Authorization"] = "Bearer admin"
+    kb = c.post("/api/v1/knowledge-bases", json={"name": "Docling默认链路"}).json()
+    doc = c.post("/api/v1/ingestions", data={"kb_id": kb["id"]},
+                 files={"file": ("maintenance.md", "# 保养\n\n检查压力值。".encode())}).json()
+    queued = c.post("/api/v1/experiments", json={
+        "kb_id": kb["id"], "document_ids": [doc["id"]],
+        "variants": [{"strategy": "window", "length": 100, "overlap": 0}],
+    })
+    assert queued.status_code == 202
+    lab.work_once()
+
+    job = c.get(f"/api/v1/jobs/{queued.json()['id']}").json()
+    assert job["status"] == "SUCCEEDED", job.get("error")
+    trial_id = job["result"]["trial_ids"][0]
+    trial = lab.store.get(trial_id, "local", "trial")
+    chunks = c.get(f"/api/v1/trials/{trial_id}/chunks").json()["items"]
+    assert trial["data"]["parser"] == "docling"
+    assert trial["data"]["parse_schema_versions"] == ["1.5"]
+    assert trial["data"]["parser_identity"].startswith("docling@2.142.0")
+    assert chunks
+    assert all(chunk["spans"][0]["item_uid"].startswith("ir_") for chunk in chunks)
 
 
 def test_presets_api_exposes_strategy_specific_labels(client):
