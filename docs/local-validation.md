@@ -1,38 +1,33 @@
 # 本地环境与源码核对记录
 
-日期：2026-10-23。此记录仅描述实际完成的检查，不等于POC通过。
+日期：2026-10-23。本文记录已实际执行的本地检查；未配置的PDF模型能力仍需独立验收。
 
-## RAGFlow
+## Docling解析
 
-- 官方仓库：https://github.com/infiniflow/ragflow.git
-- 本地目录：upstream/ragflow
-- 拉取方式：浅克隆默认分支，已成功。
-- 调研提交：e2401e54947db7eb5e542b6de26755d89886f783，提交日期2026-10-21。
-- 上游源码本体不提交至平台仓库；`scripts/prepare_ragflow.py`会在本机克隆中按固定SHA检查后生成`cmd/raglab-parser/main.go`及构建目标变更，并用标记文件记录。该本机上游目录被Git忽略。
-- 已阅读AGENTS.md。当前服务端目标为Go，新增上游功能不应写到旧Python服务端；平台外部Python网关单独维护，不放入上游仓库。
-- 已确认解析契约：internal/parser/parser/parse_result.go定义ParseResultProducer.ParseWithResult(ctx, filename, data) ParseResult，结果包含结构化DocItem、文本、元数据和警告。表格/位置字段随解析器不同，仍需真实样本测试。
-- 对应路径：internal/parser/parser、internal/ingestion/component、internal/router/router.go、internal/handler/providers.go。路由中已有解析相关入口，但尚未证明可直接满足完整定位导出；不能仅凭名称直接复用。
-- internal/engine当前目录包括elasticsearch、infinity、oceanbase、serenedb、vastbase等，未发现专用pgvector或Milvus目录。Vastbase配置存在PG兼容模式，但不据此断言普通PostgreSQL可无修改充当完整引擎。
-- 上游默认文档引擎仍为elasticsearch。平台自建pgvector索引不会自动移除RAGFlow原生依赖。
-- 上游要求通过build.sh组织Go构建及测试，涉及CGO原生库。已准备桥接源码，但当前工作站没有Go1.27工具链，因此没有完成真实编译或部署。
+- Python解析与API网关统一使用Docling SDK，依赖锁定`docling-slim==2.142.0`，运行离线且不会自动下载模型。
+- 已通过合成DOCX、PPTX、TXT和Markdown的DocumentIR转换、schema校验和浏览器端到端。
+- PDF适配要求`docling-pdf`可选依赖与`RAGLAB_DOCLING_ARTIFACTS_PATH`本地资产目录。目前工作站尚未完成PDF模型运行时和资产配置，因此扫描PDF、OCR及1000页资源上限没有通过真实样本验收。
+- 前端诊断显示SDK版本、格式、PDF运行时/资产状态、OCR选项和MineU预留状态；缺少PDF能力时解析失败并提示，不自动联网或切换解析器。
 
 ## Ollama
 
 - 实际服务：127.0.0.1:11436，由OLLAMA_HOST确认；CLI版本0.35.1。
-- 模型：qwen3-embedding:0.6b，digest ac6da0dfba84a81fdbfbaf330198c33cd77c4cdfc53e8bc50eb581914a15621d。
-- POST /api/embed：两条中文文本，truncate=false，返回2条1024维向量。
-- 服务返回total_duration=4988548400纳秒；含加载且样本极小，不作为延迟基线。
-- 已安装dengcao/Qwen3-Reranker-0.6B的F16和Q8_0版本；未验证排序协议及分数，不能宣称可用。
-- 误用默认11434时模型不存在；通过实际配置11436调用成功。后续配置必须显式固定端点。
+- 模型：qwen3-embedding:0.6b，已验证`/api/embed`返回1024维向量。
+- 已安装Reranker模型，但排序协议和分数未验证；当前产品不启用Reranker。
+- 使用配置端点11436；默认11434不保证存在同一模型。
 
 ## PostgreSQL
 
-- `graphrag-postgres-age`容器已运行；查询确认PostgreSQL17、AGE1.7.0及pgvector0.8.6。
-- 脚本创建独立`rag_lab`数据库和随机凭据，没有改动原GraphRAG业务数据库中的表。
-- 真实集成测试已通过Ollama向量生成、pgvector写入/余弦检索、黄金评测、版本发布和新Lab实例重新读取查询。该测试是功能验收样本，不是性能基准。
+- `graphrag-postgres-age`容器正在运行；曾查询确认PostgreSQL17、AGE1.7.0和pgvector0.8.6。
+- 平台使用独立`rag_lab`数据库，没有修改既有GraphRAG业务数据库中的表。
+- 真实集成覆盖Ollama向量生成、pgvector写入/余弦检索、黄金评测、版本发布和重启后查询；该用例不是性能基准。
 
-## 后续验证顺序
+## 验证范围
 
-1. 安装受支持Go工具链并按上游build.sh构建冻结版本，之后以真实RAGFlow解析结果验证桥接。
-2. 当前已通过local-baseline解析器与本地Ollama/pgvector完成闭环；RAGFlow适配尚需编译和运行验证。
-3. OBS、企业来源连接器、ACL策略、Milvus备选、完整GatePolicy及Token预算仍按后续里程碑实现。
+- `.venv\\Scripts\\python.exe -m pytest -q`覆盖隔离SQLite和本地解析；PDF模型资源与超大文档基准用例仍会在缺少资产时跳过。
+- `frontend/pnpm test`和`pnpm build`验证浏览器辅助逻辑与生产构建。
+- Playwright合成PPTX流程覆盖Docling解析、DocumentIR来源浏览、Consumer Profile创建/预览、黄金评测、发布和回滚。
+- 旧版Go解析桥接尝试未完成编译/服务验收，现已从代码、配置、运行步骤和诊断中移除；当前执行路径不需要Go。
+
+OBS企业连接器、来源ACL、Milvus备选、完整GatePolicy、Token预算和通用DAG仍按后续里程碑实现。
+- 真实集成：`RAGLAB_RUN_INTEGRATION=1 .venv/Scripts/python.exe -m pytest tests/test_live.py -q`，1 passed，使用本地Ollama和隔离PostgreSQL/pgvector库。

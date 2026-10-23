@@ -1,31 +1,28 @@
 # AutoRAG 企业文档研发试验台
 
-面向数据处理研发人员的本地平台：上传文档、配置切分预设、比较召回效果、构建并发布完整知识库版本。
-
-首期技术栈：Vue 3 / TypeScript、FastAPI、PostgreSQL + pgvector、Ollama。
-RAGFlow采用冻结Go源码的独立解析桥接；当前交付包含桥接源码及可复现准备脚本，原生运行尚未验证。
+面向数据处理研发人员的 Python 文档解析、切分试验、检索评测与版本发布平台。解析使用本地 Docling，控制面与处理网关均为 Python；自建前端展示 DocumentIR 与来源证据，支持研究人员配置业务消费字段。
 
 ## 已实现
 
-- TXT、Markdown、DOCX、文本PDF、PPTX摄入和流式接收，单文件默认上限500 MiB，文档身份/内容修订和幂等冲突检查。
-- 本地基线解析与显式RAGFlow桥接适配；未配置RAGFlow时不静默降级。
-- 递归、滑动窗口、标题条款、FAQ、表格行组五种切分预设；参数标签随策略切换。支持文本原文定位、高亮和PPTX文本框位置展示。
-- 持久化任务、Worker租约/心跳、解析和Embedding缓存、最多20组参数扫描。
-- 真实Ollama Embedding，按模型digest绑定索引；pgvector精确检索、中文BM25及RRF融合。
-- JSON/CSV黄金集、逐题Trace、文档Recall/Hit/MRR/nDCG和证据Recall/Precision/IoU。
-- 完整语料候选构建、黄金集Gate、CAS发布与历史回滚、跨服务重建后的持久查询。
-- 中文研发前端、管理员/只读令牌、配置及报告导出。
+- TXT、Markdown、DOCX、PPTX、PDF上传与流式接收，单文件默认上限500 MiB。
+- Docling DocumentIR 1.5解析、内容寻址产物、分页浏览、来源定位，以及兼容本地解析基线。
+- 五种切分预设、最多20组参数扫描、Chunk与IR UID/位置映射。
+- 版本化Consumer Profile、白名单字段选择器、字段预览及来源UID/定位。
+- PostgreSQL/pgvector、Ollama Embedding、BM25/RRF、黄金集评测、逐题Trace、发布Gate和回滚。
+- 预留MineU适配器、OBS和企业文件流接入口；未配置能力在诊断中明确标记。
 
-## 运行
+## 环境与启动
 
-要求Python 3.11+、Node 22+、pnpm、已有PostgreSQL/pgvector与Ollama。
+要求Python 3.11+、Node 22+、pnpm、PostgreSQL/pgvector和Ollama。默认Python依赖不安装Docling PDF模型运行时；在线下准备好可信的本地模型资产后，可按需安装可选依赖：
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock
 .\.venv\Scripts\python.exe -m pip install -e . --no-deps
 Copy-Item .env.example .env
-# 编辑.env：数据库连接、随机API令牌、实际Ollama端点与模型。
+# 编辑.env：数据库连接、随机API令牌、Ollama端点/模型和存储路径。
+# 可选PDF支持：pip install -e ".[docling-pdf]"；OCR支持：pip install -e ".[docling-ocr]"
+# 配置RAGLAB_DOCLING_ARTIFACTS_PATH指向已准备好的本地资产目录。
 cd frontend
 pnpm install --frozen-lockfile
 pnpm build
@@ -33,59 +30,32 @@ cd ..
 .\.venv\Scripts\python.exe -m uvicorn raglab.api:create_app --factory --host 127.0.0.1 --port 8018
 ```
 
-打开 <http://127.0.0.1:8018>，在连接页输入本地`.env`里的`RAGLAB_API_TOKEN`。
-开发前端运行`pnpm dev`，访问5173，Vite代理API到8018。后端启动时若存在frontend/dist，会同时提供静态界面。
+Docling运行时强制离线，不会自动从互联网下载模型。DOCX/PPTX/TXT/Markdown无需PDF模型资产；PDF解析依赖本地PDF模型运行时和已准备的资产。OCR默认关闭，需安装可选依赖并在本地明确开启。未知或未就绪的能力会失败并返回说明，不会自动切换解析器。
 
-本项目工作站可运行`scripts/bootstrap_local.py`，在已有`graphrag-postgres-age`容器中创建随机命名的隔离数据库和角色。
-脚本不会重建卷或修改已有GraphRAG表；通用环境请自行配置连接，不必使用此专用脚本。
-`.env`、原始文件、生成产物、依赖缓存和上游源码均不提交Git。
+打开 <http://127.0.0.1:8018>，输入`.env`中的`RAGLAB_API_TOKEN`。开发前端运行`pnpm dev`，Vite代理API至8018。项目工作站可运行`scripts/bootstrap_local.py`，在已存在的`graphrag-postgres-age`容器中创建独立测试数据库和角色；脚本不会重建卷或修改既有GraphRAG业务表。
 
-## 测试
+`.env`、原始文件、生成产物、依赖缓存和外部上游源码均不提交Git。
+
+## 验证
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests -m "not integration" -q
-$env:RAGLAB_RUN_INTEGRATION='1'
-.\.venv\Scripts\python.exe -m pytest tests/test_live.py -q
-Remove-Item Env:RAGLAB_RUN_INTEGRATION
-.\.venv\Scripts\python.exe -m ruff check src tests
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\ruff.exe check src tests scripts
+.\.venv\Scripts\python.exe -m pip check
 cd frontend
 pnpm test
 pnpm build
-# 先在另一个终端启动8018后端；测试使用本机Edge和真实Ollama/pgvector。
+# 先启动8018后端，再运行真实浏览器闭环
 pnpm test:e2e
 ```
 
-单元测试使用独立SQLite及测试Embedding，仅用于领域隔离验证；真实集成与浏览器测试使用实际Ollama/pgvector。
-两类结果分别统计。集成测试会在专用库创建测试工作区；浏览器测试会在local工作区创建带时间戳的测试知识库。
-
-## RAGFlow Go桥接
-
-```powershell
-.\.venv\Scripts\python.exe scripts/prepare_ragflow.py
-```
-
-脚本锁定官方提交`e2401e54947db7eb5e542b6de26755d89886f783`，将`patches/ragflow-parser-bridge/main.go`
-放入上游Go模块并定向原build.sh构建目标。未提交的上游改动会导致脚本拒绝覆盖。
-在符合上游AGENTS.md要求、具备Go 1.27及CGO原生库的Linux环境完成依赖准备后：
-
-```bash
-cd upstream/ragflow
-bash build.sh --go
-export RAGLAB_RAGFLOW_TOKEN='your-separate-bridge-token'
-./bin/raglab_parser
-```
-
-随后配置网关的`RAGLAB_RAGFLOW_URL`和`RAGLAB_RAGFLOW_TOKEN`，在前端显式选择RAGFlow。
-桥接首轮PDF模式为plain_text，未宣称完成OCR或复杂PDF结构验证。
+单元测试使用隔离SQLite与测试Embedding；真实集成和Playwright使用本地Ollama及PostgreSQL/pgvector。PDF模型资产和扫描件OCR需要单独按目标环境完成验证，不能用文本型PDF结果替代。
 
 ## 当前边界
 
-- 精确Token预算、父子/语义切分、OCR、自动下载公开基准适配器、Milvus备用实现待后续完成。
-- 当前预算为Unicode字符，界面明确显示字符；没有伪造Token计数。
-- 黄金集支持自有统一JSON/CSV；公开基准需要先转换和核验标签/许可。
-- OBS、企业SSO/来源ACL与企业生产接入只预留契约；raw上传是单机令牌下的通用文件流入口。
-- 模型/RAGFlow/数据库连接故障明确显示错误；未验证的Reranker默认不启用。
-- 首期Gate按文档Recall及执行错误率验证，尚未实现完整v3相对基线和多指标Gate策略。
+- PDF/OCR与1000页资源上限尚未在本地模型资产环境通过基准验收。
+- 精确Token预算、父子/语义切分、公开数据集适配、完整多指标Gate、Milvus备选尚未实现。
+- OBS、企业SSO/来源ACL和企业生产文件流仍为预留接口；raw文件流当前使用单机令牌。
+- MineU仅在解析器注册契约预留，尚未接入；Reranker未验证，不会默认启用。
 
-完整实现逻辑见[readFunction.md](readFunction.md)，开发证据见[docs/development-progress.md](docs/development-progress.md)。
-本地运行状态与原始调研文档属于先前观察，不代表当前全部能力完成。
+完整实现逻辑见[readFunction.md](readFunction.md)，实施设计见[设计说明](docs/superpowers/specs/2026-10-23-docling-document-ir-workbench-design.md)，验证记录见[docs/local-validation.md](docs/local-validation.md)。

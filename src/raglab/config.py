@@ -12,11 +12,8 @@ class Settings(BaseSettings):
     ollama_url: str = "http://127.0.0.1:11436"
     embed_model: str = "qwen3-embedding:0.6b"
     vector_dim: int = 1024
-    ragflow_url: str = ""
-    ragflow_token: str = ""
     docling_artifacts_path: Path | None = None
     docling_do_ocr: bool = False
     docling_table_structure: bool = True
     docling_max_pages: int = 1000
     max_file_bytes: int = 500 * 1024 * 1024
-    ragflow_revision: str = "e2401e54947db7eb5e542b6de26755d89886f783"

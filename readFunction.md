@@ -151,21 +151,11 @@ Blob引用必须经业务资源授权后访问，当前没有公开原始Blob下
 发布页面先完整构建，再由用户点击激活，历史READY版本可显式回滚。
 OBS、Rerank、Token预算在诊断页面标记尚未启用，不能把预留项显示为已运行。
 
-## 十一 RAGFlow定制文件
+## Docling运行能力与限制
 
-`patches/ragflow-parser-bridge/main.go`在冻结Go模块内复用官方Parser，
-实现带独立令牌的/internal/v1/parse。DOCX要求JSON结构；PDF首期明确plain_text；
-Markdown禁用远程图片下载。TableData映射为行组并保留原始结构，未知页码返回null。
-脚本`scripts/prepare_ragflow.py`检查SHA和干净工作区后应用可复现构建目标改动。
-当前工作站无Go工具链。Docker Hub Go镜像下载遇到鉴权连接EOF，官方Windows工具链直连下载因速度过慢超时；且上游构建还需要Linux及CGO原生库。因此桥接源码尚未完成真实编译/端到端验证，
-API契约测试使用隔离HTTP传输检查字段与拒绝错误revision，不将其称为真实上游测试。
+Docling是唯一的主解析适配器，依赖版本锁定为`docling-slim 2.142.0`；解析器身份同时包含适配器版本和pipeline配置摘要。默认离线运行，DOCX/PPTX/TXT/Markdown可在没有PDF本地模型资产时使用。PDF需要安装`docling-pdf`可选依赖并通过`RAGLAB_DOCLING_ARTIFACTS_PATH`提供本地资产；OCR默认关闭，启用前需安装`docling-ocr`扩展。缺少运行时或资产时显式失败，不会联网下载或退回其他解析器。
 
-## 十二 已知后续模块
-
-精确Tokenizer、父子/语义算法、公开基准下载适配、完整GatePolicy、OBS/来源ACL、
-Milvus备用路径、产物GC、备份恢复脚本及RAGFlow运行验证继续按v3里程碑推进。
-当前交付是三个本地研发闭环首个可运行版本，不等于v3全范围或生产验收完成。
-
+`GET /api/v1/diagnostics`报告Docling版本、支持格式、PDF模型运行时/资产状态、OCR与表格结构配置，以及尚未配置的MineU适配器。扫描件识别和1000页资源上限尚未完成真实资产验收；接口能力声明不能代替目标环境的文档质量和资源基准。
 ## DocumentIR产物与查询API
 
 Docling解析结果先通过`validate_document_ir`跨引用校验，再以UTF-8紧凑JSON写入临时文件，并由`BlobStore.put`分块计算SHA-256后写入内容寻址Blob目录。`parse_snapshot`关系记录只保存schema、解析器身份、条目/页数及产物哈希和大小，不持有整份items数组；读取时`BlobStore.read_verified`核对内容哈希，再执行Pydantic模型与IR引用校验。解析缓存键含文档ID、源文件hash、解析器版本，因此不同解析器版本生成不同快照。临时序列化文件在成功或异常时都会删除。

@@ -18,7 +18,7 @@ from .document_ir.validation import validate_document_ir
 from .golden import GoldenItem
 from .metrics import assemble, evidence_metrics, ranking_metrics, rrf
 from .models import Ollama
-from .parsing import LocalParserAdapter, RagflowParserAdapter
+from .parsing import LocalParserAdapter
 from .persistence import BlobStore, Store, digest, uid
 from .retrieval import bm25
 
@@ -38,8 +38,6 @@ class Lab:
                 artifacts_path=settings.docling_artifacts_path,
                 max_pages=settings.docling_max_pages,
             )),
-            "ragflow": RagflowParserAdapter(settings.ragflow_url, settings.ragflow_token,
-                                             f"ragflow@{settings.ragflow_revision}"),
         }
         self.parser_adapters.update(parser_adapters or {})
 

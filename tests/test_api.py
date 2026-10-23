@@ -88,6 +88,27 @@ def test_default_file_limit_is_500_mib():
     assert Settings().max_file_bytes == 500 * 1024 * 1024
 
 
+def test_docling_diagnostics_report_version_formats_and_pdf_assets(client):
+    c, _ = client
+    c.headers["Authorization"] = "Bearer admin"
+    response = c.get("/api/v1/diagnostics")
+    assert response.status_code == 200
+    data = response.json()
+    assert set(data["parsers"]) == {"docling", "local_baseline", "mineu"}
+    assert data["parsers"]["docling"]["available"] is True
+    assert data["parsers"]["docling"]["version"].startswith("docling@2.142.0")
+    assert set(data["parsers"]["docling"]["supported_formats"]) >= {"PDF", "DOCX", "PPTX", "TXT", "Markdown"}
+    assert data["parsers"]["docling"]["pdf_assets_status"] in {
+        "ready", "runtime_missing", "assets_missing"}
+
+
+def test_unconfigured_optional_parser_is_explicitly_unavailable(client):
+    c, _ = client
+    c.headers["Authorization"] = "Bearer admin"
+    optional = c.get("/api/v1/diagnostics").json()["parsers"]["mineu"]
+    assert optional == {"available": False, "status": "reserved_not_configured"}
+
+
 def test_new_experiments_default_to_docling_parser():
     body = ExperimentBody.model_validate({"kb_id": "kb", "document_ids": ["doc"],
                                           "variants": [{"strategy": "recursive"}]})

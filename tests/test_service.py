@@ -133,10 +133,10 @@ def test_experiment_evaluation_release_rollback_closed_loop(lab):
         lab.search("other", trial["id"], "x", 5, 100, "vector")
 
 
-def test_missing_golden_and_unconfigured_ragflow_fail_closed(lab):
+def test_missing_golden_and_unknown_parser_fail_closed(lab):
     kb, doc = setup(lab)
     job = lab.store.enqueue("w", "experiment", {"kb_id": kb["id"], "document_ids": [doc["id"]],
-              "parser": "ragflow", "variants": [{"strategy": "window", "length": 100, "overlap": 0}]}, "bad")
+              "parser": "unconfigured", "variants": [{"strategy": "window", "length": 100, "overlap": 0}]}, "bad")
     lab.work_once()
     assert lab.store.get_job(job["id"], "w")["status"] == "FAILED"
     assert not lab.store.get(kb["id"], "w")["data"]["active_release_id"]

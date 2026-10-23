@@ -2,6 +2,7 @@
 import csv
 import hashlib
 import hmac
+import importlib.util
 import io
 import json
 import tempfile
@@ -23,7 +24,6 @@ from .config import Settings
 from .document_ir.chunk_projection import to_chunking_document
 from .document_ir.consumer_profiles import ConsumerField
 from .golden import GoldenItem
-from .parsing import probe_ragflow
 from .persistence import FileTooLargeError, uid
 from .service import Lab
 
@@ -172,13 +172,23 @@ def create_app(settings=None, lab=None, start_worker=True):
             model = {"available": True, **binding}
         except Exception:
             model = {"available": False, "model": settings.embed_model}
-        ragflow_health = probe_ragflow(settings.ragflow_url, settings.ragflow_token,
-                                       f"ragflow@{settings.ragflow_revision}")
+        docling = lab.parser_adapters["docling"]
+        pdf_runtime = importlib.util.find_spec("docling_ibm_models") is not None
+        assets_path = settings.docling_artifacts_path
+        has_assets = bool(assets_path and assets_path.is_dir() and any(assets_path.iterdir()))
+        pdf_assets_status = "ready" if pdf_runtime and has_assets else (
+            "runtime_missing" if not pdf_runtime else "assets_missing")
         return {"database": "postgresql+pgvector" if lab.store.pg else "sqlite-test",
-                "model": model, "parsers": {"local": True, "mineu_reserved": True,
-                                             "ragflow_configured": bool(settings.ragflow_url),
-                                             "ragflow_available": ragflow_health["available"],
-                                             "ragflow_parser": ragflow_health["parser"]},
+                "model": model, "parsers": {
+                    "docling": {"available": True, "version": docling.version,
+                                "supported_formats": ["PDF", "DOCX", "PPTX", "TXT", "Markdown"],
+                                "pdf_runtime_available": pdf_runtime,
+                                "pdf_assets_configured": has_assets,
+                                "pdf_assets_status": pdf_assets_status,
+                                "ocr_enabled": settings.docling_do_ocr,
+                                "table_structure_enabled": settings.docling_table_structure},
+                    "local_baseline": {"available": True, "status": "compatibility_only"},
+                    "mineu": {"available": False, "status": "reserved_not_configured"}},
                 "token_budget_available": False, "reranker_available": False,
                 "obs_connector": "reserved", "workspace": workspace}
 

@@ -1,11 +1,10 @@
-"""显式的本地基线解析器，以及独立RAGFlow Go桥接协议适配。"""
+"""显式保留的兼容本地基线解析器。"""
 import io
 import re
 import zipfile
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
-import httpx
 from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
@@ -13,8 +12,6 @@ from pptx import Presentation
 from pptx.exc import PackageNotFoundError
 from pypdf import PdfReader
 
-RAGFLOW_REVISION = "e2401e54947db7eb5e542b6de26755d89886f783"
-RAGFLOW_PARSER_ID = f"ragflow@{RAGFLOW_REVISION}"
 LOCAL_PARSER_ID = "local-baseline@2"
 
 
@@ -31,15 +28,6 @@ class LocalParserAdapter:
 
     def parse(self, name, data, revision):
         return parse_local(name, data, revision)
-
-
-class RagflowParserAdapter:
-    def __init__(self, url, token, expected_parser=RAGFLOW_PARSER_ID):
-        self.url, self.token, self.expected_parser = url, token, expected_parser
-        self.version = expected_parser
-
-    def parse(self, name, data, revision):
-        return parse_ragflow(name, data, revision, self.url, self.token, self.expected_parser)
 
 
 def _stream(data):
@@ -105,42 +93,10 @@ def parse_local(name, data, revision):
     else:
         raise ValueError("支持TXT/MD/DOCX/文本PDF/PPTX；旧版PPT请先另存为PPTX")
     if not blocks:
-        raise ValueError("未提取到文本；扫描件需要配置OCR/RAGFlow解析器")
+        raise ValueError("未提取到文本；扫描件请安装并配置Docling PDF模型资产及OCR")
     result = {"schema_version": 1, "revision": revision, "parser": LOCAL_PARSER_ID,
-              "blocks": blocks, "warnings": ["本地基线不是RAGFlow；DOCX页码与PDF表格结构不保证",
+              "blocks": blocks, "warnings": ["兼容本地基线不保证DOCX页码与PDF表格结构",
                                              "PPTX图片中的文字不执行OCR"]}
     if ext == ".pptx":
         result["slide_size"] = {"width": int(presentation.slide_width), "height": int(presentation.slide_height)}
     return result
-
-
-def probe_ragflow(url, token, expected_parser=RAGFLOW_PARSER_ID):
-    if not url:
-        return {"available": False, "parser": None}
-    try:
-        with httpx.Client(timeout=5, trust_env=False) as client:
-            response = client.get(url.rstrip("/") + "/health",
-                                  headers={"Authorization": f"Bearer {token}"})
-            response.raise_for_status()
-            parser = response.json().get("parser")
-        return {"available": parser == expected_parser, "parser": parser}
-    except (httpx.HTTPError, ValueError):
-        return {"available": False, "parser": None}
-
-
-def parse_ragflow(name, data, revision, url, token, expected_parser=RAGFLOW_PARSER_ID):
-    if not url:
-        raise ValueError("RAGFlow解析桥接尚未配置；请先部署bridge或显式选择本地基线")
-    with httpx.Client(timeout=180, trust_env=False) as client:
-        response = client.post(url.rstrip("/") + "/internal/v1/parse",
-                               files={"file": (name, data)}, data={"revision": revision},
-                               headers={"Authorization": f"Bearer {token}"})
-        response.raise_for_status()
-        parsed = response.json()
-    if (parsed.get("schema_version") != 1 or parsed.get("revision") != revision
-            or not parsed.get("blocks") or parsed.get("parser") != expected_parser):
-        raise ValueError("RAGFlow响应契约不合法")
-    for block in parsed["blocks"]:
-        if not isinstance(block, dict) or not isinstance(block.get("text"), str) or not block.get("id"):
-            raise ValueError("RAGFlow块缺少文本/来源")
-    return parsed

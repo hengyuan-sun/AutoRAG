@@ -197,12 +197,12 @@
 - Keep adapter diagnostics for Docling version, model asset availability, supported formats, and unavailable optional MineU/MinerU adapters.
 - Document model artifact preparation, offline execution, memory/concurrency limits, unsupported features and test commands in Chinese.
 
-- [ ] **Step 1: Write failing diagnostics tests** `test_docling_diagnostics_report_version_and_assets` and `test_unconfigured_optional_parser_is_explicitly_unavailable`.
-- [ ] **Step 2: Run** `.venv\Scripts\python.exe -m pytest tests/test_parsing_contract.py tests/test_parser_presets.py -q` and verify old RAGFlow expectations are isolated.
-- [ ] **Step 3: Remove RAGFlow-specific settings, bridge source and setup script**, and replace prior RAGFlow contract tests with Docling capability/diagnostic assertions.
-- [ ] **Step 4: Update** `readFunction.md`, `README.md`, `docs/development-progress.md` and `docs/local-validation.md`; distinguish passed tests from unavailable capabilities and real-source checks.
-- [ ] **Step 5: Run full backend checks** `.venv\Scripts\python.exe -m pytest -q`, `.venv\Scripts\ruff.exe check src tests scripts`, and the real Ollama/PostgreSQL integration test.
-- [ ] **Step 6: Run full frontend checks** `pnpm test`, `pnpm build`, and `pnpm test:e2e`.
+- [x] **Step 1: Write failing diagnostics tests** `test_docling_diagnostics_report_version_and_assets` and `test_unconfigured_optional_parser_is_explicitly_unavailable`.
+- [x] **Step 2: Run** `.venv\Scripts\python.exe -m pytest tests/test_parsing_contract.py tests/test_parser_presets.py -q` and verify old RAGFlow expectations are isolated.
+- [x] **Step 3: Remove RAGFlow-specific settings, bridge source and setup script**, and replace prior RAGFlow contract tests with Docling capability/diagnostic assertions.
+- [x] **Step 4: Update** `readFunction.md`, `README.md`, `docs/development-progress.md` and `docs/local-validation.md`; distinguish passed tests from unavailable capabilities and real-source checks.
+- [x] **Step 5: Run full backend checks** `.venv\Scripts\python.exe -m pytest -q`, `.venv\Scripts\ruff.exe check src tests scripts`, and the real Ollama/PostgreSQL integration test.
+- [x] **Step 6: Run full frontend checks** `pnpm test`, `pnpm build`, and `pnpm test:e2e`.
 - [ ] **Step 7: Run** `git diff --check`; review the whole branch diff and push the completed implementation to `origin/feat/rag-lab`.
 - [ ] **Step 8: Commit** the bridge removal and final documentation as `refactor: replace RAGFlow bridge with Docling workflow`.
 
