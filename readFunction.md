@@ -42,7 +42,17 @@ Blob读路径只接受64位hex，防止目录穿越。外部访问产物必须�
 旧Worker即使恢复运行也不能保存评测/Trial或覆盖索引。发布指针使用CAS比较expected_release，
 只有符合当前活动版本的写入可成功。测试覆盖跨工作区拒绝、幂等、旧Worker与并发发布语义。
 
-## 四 解析身份
+## 四 DocumentIR契约
+
+`src/raglab/document_ir/models.py`提供与解析引擎解耦的DocumentIR 1.5数据模型：文件元信息、引擎身份、章节树、标题/段落/表格/图片/公式、目录、页眉页脚、来源区间和物理定位、证据状态、关系、页记录、provider/config快照、外部产物及分片manifest。每个内容项保留稳定UID；无法从解析器取得的页码、坐标或字段保持缺省，不由模型推导。
+
+模型使用Pydantic v2判别联合检查核心条目类型，并对页码、行列坐标、区间、bbox和有限数值做字段级校验。未知的引擎扩展数据可随模型保留，接入方应放在`extensions`命名空间；业务规则通过`validate_document_ir`集中检查UID唯一性、parent/outline/关系引用、表格单元格边界和来源区间。
+
+调用方先`DocumentIR.model_validate(payload)`，再调用`validate_document_ir(ir)`完成跨项检查；持久化使用`model_dump(mode="json")`。该模块只定义和验证解析结果，不负责将IR转换成Chunk，也不把Docling对象泄漏到API或业务配置。
+
+验证：`tests/test_document_ir_models.py`覆盖1.5核心项类型、JSON往返、位置和证据状态；`tests/test_document_ir_validation.py`覆盖重复UID、悬空关系、越界单元格和非有限坐标。
+
+## 五 解析身份
 
 `parsing.py`包含显式local-baseline@2，用python-docx/pypdf/python-pptx解析DOCX/文本PDF/PPTX及TXT/MD。
 DOCX保留段落顺序和表格行，Markdown保留标题路径；没有可靠页码时返回null。
@@ -57,13 +67,13 @@ RAGFlow适配调用配置的`/internal/v1/parse`内部桥接，健康诊断和�
 parser身份及blocks。
 未配置桥接时明确失败，不偷偷改用本地解析。上游Go源码构建及端到端验证另行记录。
 
-## 五 开发验证状态
+## 六 开发验证状态
 
 后端默认套件45项通过、1项真实依赖用例默认跳过；启用集成环境后，真实Ollama与PostgreSQL/pgvector链路1项通过。
 前端Vitest 3项通过，Playwright完整闭环1项通过，Vue类型检查及Vite生产构建通过，Ruff静态检查通过。
 评审回归覆盖失效租约写入、旧模型身份、文档TopK以及黄金集嵌套字段校验。
 
-## 六 领域服务和三个闭环
+## 七 领域服务和三个闭环
 
 `service.py`的Lab是API与Worker共享的领域入口。资源操作均接收workspace，
 外部HTTP单机身份固定为local，客户端不能通过自报workspace越权。
@@ -95,7 +105,7 @@ parser身份及blocks。
 激活/回滚通过expected_release_id执行CAS，模型digest不再可用则拒绝；
 单条查询开始时固定Release，原数据和模型配置不会因默认配置改变而混用。
 
-## 七 模型适配
+## 八 模型适配
 
 `models.py`在/api/tags中按绑定内的模型名定位Ollama模型并固定digest，/api/embed使用truncate=false，
 对文档与查询使用不同的角色缓存，查询加入固定检索指令。
@@ -104,7 +114,7 @@ parser身份及blocks。
 Reranker尚未启用；模型已安装不等于评分协议已验证。修改默认模型不会使既有Release失效；
 只有原绑定模型被卸载或其digest改变时才拒绝激活或继续检索。
 
-## 八 API与后台任务
+## 九 API与后台任务
 
 `api.py`以FastAPI提供知识库、文件流、实验、评测、发布和检索接口，
 请求采用Pydantic限制长度、枚举与参数组数。401表示无令牌，403只读拒绝，
@@ -121,7 +131,7 @@ multipart文件使用上传临时流，单文件上限默认500 MiB；摄入不�
 JSON/CSV黄金集导入上限5MB。
 Blob引用必须经业务资源授权后访问，当前没有公开原始Blob下载端点。
 
-## 九 前端实现
+## 十 前端实现
 
 `frontend/src/App.vue`按文件试验、黄金评测、版本发布、历史诊断四个工作区组织。
 连接令牌仅保存在sessionStorage，不打包进静态资源；请求通过api.ts统一加鉴权及展示结构化错误。
@@ -133,7 +143,7 @@ Blob引用必须经业务资源授权后访问，当前没有公开原始Blob下
 发布页面先完整构建，再由用户点击激活，历史READY版本可显式回滚。
 OBS、Rerank、Token预算在诊断页面标记尚未启用，不能把预留项显示为已运行。
 
-## 十 RAGFlow定制文件
+## 十一 RAGFlow定制文件
 
 `patches/ragflow-parser-bridge/main.go`在冻结Go模块内复用官方Parser，
 实现带独立令牌的/internal/v1/parse。DOCX要求JSON结构；PDF首期明确plain_text；
@@ -142,7 +152,7 @@ Markdown禁用远程图片下载。TableData映射为行组并保留原始结构
 当前工作站无Go工具链。Docker Hub Go镜像下载遇到鉴权连接EOF，官方Windows工具链直连下载因速度过慢超时；且上游构建还需要Linux及CGO原生库。因此桥接源码尚未完成真实编译/端到端验证，
 API契约测试使用隔离HTTP传输检查字段与拒绝错误revision，不将其称为真实上游测试。
 
-## 十一 已知后续模块
+## 十二 已知后续模块
 
 精确Tokenizer、父子/语义算法、公开基准下载适配、完整GatePolicy、OBS/来源ACL、
 Milvus备用路径、产物GC、备份恢复脚本及RAGFlow运行验证继续按v3里程碑推进。
