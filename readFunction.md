@@ -54,18 +54,18 @@ Blob读路径只接受64位hex，防止目录穿越。外部访问产物必须�
 
 ## 五 解析身份
 
-`parsing.py`包含显式local-baseline@2，用python-docx/pypdf/python-pptx解析DOCX/文本PDF/PPTX及TXT/MD。
-DOCX保留段落顺序和表格行，Markdown保留标题路径；没有可靠页码时返回null。
-PPTX按幻灯片和文本框/表格形状提取，保留slide、shape id、形状位置、字符区间和表格行；
-前端按原幻灯片比例定位文本框并高亮Chunk来源。PPTX图片和主题装饰不渲染，图片文字不做OCR。
-扫描件无文本时失败并说明需要OCR。该解析器不冒充RAGFlow。
+`src/raglab/document_ir/docling_adapter.py`使用锁定的Docling 2.142.0 Python SDK，将路径文件转为DocumentIR 1.5。
+IR投影接入后新实验默认Docling；平台同时保留local-baseline@2用于读取旧快照和兼容解析。Adapter身份包括SDK版本、
+适配器版本及规范化pipeline配置摘要，文件hash和该身份共同决定解析缓存。Docling导出的标题、段落、
+表格单元格、图片/公式占位、章节路径、能取得的页坐标和warnings进入统一模型；缺失页码/坐标继续为空。
 
-`ParserAdapter`统一`parse(name, data, revision)`契约；Local和RAGFlow为首期实现，
-Lab允许注入后续适配器，内部集成时mineU可按相同ParsedDocument/source span契约注册。
+Docling读取路径文件。`Lab.parsed`从BlobStore以64KiB块写到临时文件，解析完成或失败后删除临时文件，
+不会把500MiB上传额外读入内存。TXT通过临时Markdown文件交给Docling，仍按磁盘流式复制。
+PDF运行强制离线：必须配置本地模型资产目录，并安装可选`docling-pdf`依赖；未满足时返回明确原因，
+不会退回旧解析器或联网下载。OCR默认关闭，需要时安装`docling-ocr`并显式配置。
 
-RAGFlow适配调用配置的`/internal/v1/parse`内部桥接，健康诊断和解析都校验固定上游revision、
-parser身份及blocks。
-未配置桥接时明确失败，不偷偷改用本地解析。上游Go源码构建及端到端验证另行记录。
+旧Local解析器仍输出兼容blocks；DocumentIR在Task 3投影层转换为带UID和原文来源的ChunkingBlock，
+不能把Docling原生对象直接当作切分块。MineU/MinerU后续也通过解析适配器注册。
 
 ## 六 开发验证状态
 

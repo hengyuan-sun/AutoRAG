@@ -2,6 +2,7 @@
 import io
 import json
 import math
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 from sqlalchemy.exc import IntegrityError
 
 from .chunking import chunk_document, presets
+from .document_ir.docling_adapter import DoclingOptions, DoclingParserAdapter
 from .golden import GoldenItem
 from .metrics import assemble, evidence_metrics, ranking_metrics, rrf
 from .models import Ollama
@@ -26,6 +28,12 @@ class Lab:
         self.embedder = embedder or Ollama(settings.ollama_url, settings.embed_model, settings.vector_dim)
         self.parser_adapters = {
             "local": LocalParserAdapter(),
+            "docling": DoclingParserAdapter(DoclingOptions(
+                do_ocr=settings.docling_do_ocr,
+                do_table_structure=settings.docling_table_structure,
+                artifacts_path=settings.docling_artifacts_path,
+                max_pages=settings.docling_max_pages,
+            )),
             "ragflow": RagflowParserAdapter(settings.ragflow_url, settings.ragflow_token,
                                              f"ragflow@{settings.ragflow_revision}"),
         }
@@ -86,6 +94,20 @@ class Lab:
         key = digest([document_id, doc["data"]["hash"], parser, adapter.version])
 
         def compute():
+            if getattr(adapter, "path_based", False):
+                temp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode="wb", suffix=Path(doc["data"]["name"]).suffix,
+                                                     dir=self.settings.storage, delete=False) as staged:
+                        temp_path = Path(staged.name)
+                        with self.blobs.open(doc["data"]["hash"]) as raw:
+                            while part := raw.read(65536):
+                                staged.write(part)
+                    parsed = adapter.parse(doc["data"]["name"], temp_path, document_id)
+                    return parsed.model_dump(mode="json") if hasattr(parsed, "model_dump") else parsed
+                finally:
+                    if temp_path is not None:
+                        temp_path.unlink(missing_ok=True)
             with self.blobs.open(doc["data"]["hash"]) as raw:
                 return adapter.parse(doc["data"]["name"], raw, document_id)
 

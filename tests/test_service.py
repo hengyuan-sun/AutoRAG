@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,34 @@ def setup(lab):
     doc = lab.ingest("w", kb["id"], "工艺.txt", io.BytesIO("温度80℃。安全检查合格。".encode()),
                      "manual", "工艺", "1")
     return kb, doc
+
+
+def test_path_parser_receives_streamed_temp_file_and_cache_tracks_parser_version(lab):
+    seen = []
+
+    class PathAdapter:
+        path_based = True
+        version = "path-parser@1"
+
+        def parse(self, name, source_path, revision):
+            path = Path(source_path)
+            seen.append((self.version, str(path), path.exists(), path.read_bytes(), path.suffix))
+            return {"parser": self.version, "revision": revision, "blocks": []}
+
+    kb, doc = setup(lab)
+    lab.parser_adapters["path"] = PathAdapter()
+    first = lab.parsed("w", doc["id"], "path")
+    first_temp = seen[-1]
+    assert first["parser"] == "path-parser@1"
+    assert first_temp[2:4] == (True, "温度80℃。安全检查合格。".encode())
+    assert not Path(first_temp[1]).exists()
+
+    lab.parser_adapters["path"] = PathAdapter()
+    lab.parser_adapters["path"].version = "path-parser@2"
+    second = lab.parsed("w", doc["id"], "path")
+    assert second["parser"] == "path-parser@2"
+    assert len(seen) == 2
+    assert not Path(seen[-1][1]).exists()
 
 
 def test_ingest_idempotency_conflict_and_scope(lab):
