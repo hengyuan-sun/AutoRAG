@@ -14,4 +14,5 @@ class Settings(BaseSettings):
     vector_dim: int = 1024
     ragflow_url: str = ""
     ragflow_token: str = ""
-    max_file_bytes: int = 50 * 1024 * 1024
+    max_file_bytes: int = 500 * 1024 * 1024
+    ragflow_revision: str = "e2401e54947db7eb5e542b6de26755d89886f783"

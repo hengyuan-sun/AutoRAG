@@ -17,7 +17,7 @@ import (
 )
 
 const revision = "e2401e54947db7eb5e542b6de26755d89886f783"
-const maxBytes = 50 << 20
+const maxBytes = 500 << 20
 
 type block struct {
     ID string `json:"id"`
@@ -71,6 +71,7 @@ func serve(token string) http.Handler {
             p := parser.NewDOCXParser()
             p.ConfigureFromSetup(map[string]any{"output_format":"json"})
             producer = p
+        case ".pptx": producer = parser.NewPPTXParser()
         case ".pdf":
             p := parser.NewPDFParser()
             // 首轮桥接明确仅启用文本PDF。OCR依赖作为后续配置能力。

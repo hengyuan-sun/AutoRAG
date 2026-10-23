@@ -11,7 +11,8 @@ def document(text, kind="text", rows=None):
 @pytest.mark.parametrize("strategy", ["recursive", "window", "heading", "faq", "table"])
 def test_all_presets_preserve_source(strategy):
     text = "标题\n\n问：温度？\n答：80℃。\n" * 30
-    chunks = chunk_document(document(text), strategy, 100, 20)
+    overlap = 0 if strategy == "table" else 20
+    chunks = chunk_document(document(text), strategy, 100, overlap)
     assert chunks
     covered = set()
     for c in chunks:

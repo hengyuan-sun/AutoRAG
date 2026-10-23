@@ -41,6 +41,10 @@ def digest(value):
                                      separators=(",", ":")).encode()).hexdigest()
 
 
+class FileTooLargeError(ValueError):
+    pass
+
+
 class Store:
     def __init__(self, url, dimension):
         self.engine = create_engine(url, pool_pre_ping=True,
@@ -252,7 +256,7 @@ class BlobStore:
                 while part := stream.read(65536):
                     total += len(part)
                     if total > self.max_bytes:
-                        raise ValueError("文件超过大小上限")
+                        raise FileTooLargeError(f"单文件不得超过{self.max_bytes}字节")
                     h.update(part)
                     f.write(part)
             if not total:
@@ -265,6 +269,10 @@ class BlobStore:
                 Path(name).unlink()
 
     def read(self, hash_):
+        with self.open(hash_) as stream:
+            return stream.read()
+
+    def open(self, hash_):
         if not re.fullmatch(r"[a-f0-9]{64}", hash_):
             raise ValueError("无效产物标识")
-        return (self.root / hash_).read_bytes()
+        return (self.root / hash_).open("rb")

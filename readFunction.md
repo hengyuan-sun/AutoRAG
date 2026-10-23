@@ -4,7 +4,10 @@
 
 ## 一 切分模块
 
-`src/raglab/chunking.py`提供递归、滑动窗口、标题条款、FAQ、表格行组五种真实实现。
+`src/raglab/chunking.py`提供递归、滑动窗口、标题条款、FAQ、表格行组五种真实实现，
+每种策略通过API返回名称、说明、推荐长度和策略专属字段标签。切换策略时前端更新推荐参数；
+表格策略隐藏并拒绝重叠，避免出现界面允许、实现忽略的配置。
+递归中的长度是单块上限：先使用段落/句子分隔符，仍然超长才继续切；固定窗口则每次按窗口长度移动。
 每个解析块内使用Unicode码点的左闭右开区间。Chunk同时保存spans和render segments，
 因此同样文字出现在不同文档或位置时不会误合并。表格重复表头引用原始表头区间，
 不会成为额外黄金证据。超长表格行保留完整内容并警告，不静默截列。
@@ -41,17 +44,23 @@ Blob读路径只接受64位hex，防止目录穿越。外部访问产物必须�
 
 ## 四 解析身份
 
-`parsing.py`包含显式local-baseline@1，用python-docx/pypdf解析DOCX/文本PDF及TXT/MD。
+`parsing.py`包含显式local-baseline@2，用python-docx/pypdf/python-pptx解析DOCX/文本PDF/PPTX及TXT/MD。
 DOCX保留段落顺序和表格行，Markdown保留标题路径；没有可靠页码时返回null。
+PPTX按幻灯片和文本框/表格形状提取，保留slide、shape id、形状位置、字符区间和表格行；
+前端按原幻灯片比例定位文本框并高亮Chunk来源。PPTX图片和主题装饰不渲染，图片文字不做OCR。
 扫描件无文本时失败并说明需要OCR。该解析器不冒充RAGFlow。
 
-RAGFlow适配调用配置的`/internal/v1/parse`内部桥接，校验revision、parser身份及blocks。
+`ParserAdapter`统一`parse(name, data, revision)`契约；Local和RAGFlow为首期实现，
+Lab允许注入后续适配器，内部集成时mineU可按相同ParsedDocument/source span契约注册。
+
+RAGFlow适配调用配置的`/internal/v1/parse`内部桥接，健康诊断和解析都校验固定上游revision、
+parser身份及blocks。
 未配置桥接时明确失败，不偷偷改用本地解析。上游Go源码构建及端到端验证另行记录。
 
 ## 五 开发验证状态
 
-后端默认套件36项通过、1项真实依赖用例默认跳过；启用集成环境后，真实Ollama与PostgreSQL/pgvector链路1项通过。
-前端Vitest 1项通过，Playwright完整闭环1项通过，Vue类型检查及Vite生产构建通过，Ruff静态检查通过。
+后端默认套件45项通过、1项真实依赖用例默认跳过；启用集成环境后，真实Ollama与PostgreSQL/pgvector链路1项通过。
+前端Vitest 3项通过，Playwright完整闭环1项通过，Vue类型检查及Vite生产构建通过，Ruff静态检查通过。
 评审回归覆盖失效租约写入、旧模型身份、文档TopK以及黄金集嵌套字段校验。
 
 ## 六 领域服务和三个闭环
@@ -108,7 +117,8 @@ job领取后启动15秒心跳，60秒租约，fencing token保证旧Worker不能
 尚未提供取消任务、后台产物GC和生产级阶段分布式协调，不能将其视为完整调度平台。
 
 raw入口逐个读取请求分片，累计hash及大小后才调用摄入，断流不创建成功资源。
-multipart文件使用上传临时流，超过上限会拒绝。JSON/CSV黄金集导入上限5MB。
+multipart文件使用上传临时流，单文件上限默认500 MiB；摄入不会为推导默认revision重复写Blob，超限返回413。
+JSON/CSV黄金集导入上限5MB。
 Blob引用必须经业务资源授权后访问，当前没有公开原始Blob下载端点。
 
 ## 九 前端实现
@@ -129,7 +139,7 @@ OBS、Rerank、Token预算在诊断页面标记尚未启用，不能把预留项
 实现带独立令牌的/internal/v1/parse。DOCX要求JSON结构；PDF首期明确plain_text；
 Markdown禁用远程图片下载。TableData映射为行组并保留原始结构，未知页码返回null。
 脚本`scripts/prepare_ragflow.py`检查SHA和干净工作区后应用可复现构建目标改动。
-当前工作站缺少Go工具链和原生库，因此桥接源码尚未完成真实编译/端到端验证，
+当前工作站无Go工具链。Docker Hub Go镜像下载遇到鉴权连接EOF，官方Windows工具链直连下载因速度过慢超时；且上游构建还需要Linux及CGO原生库。因此桥接源码尚未完成真实编译/端到端验证，
 API契约测试使用隔离HTTP传输检查字段与拒绝错误revision，不将其称为真实上游测试。
 
 ## 十一 已知后续模块

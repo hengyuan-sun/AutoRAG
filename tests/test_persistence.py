@@ -41,7 +41,7 @@ def test_job_lease_and_publish_cas(tmp_path):
 
 def test_local_parser_reports_identity_and_no_fake_pages():
     parsed = parse_local("x.md", "# 工艺\n\n温度80℃\n\n|列|数值|\n|--|--|\n|A|80|".encode(), "r1")
-    assert parsed["parser"] == "local-baseline@1"
+    assert parsed["parser"] == "local-baseline@2"
     assert parsed["blocks"]
     assert all(b["page"] is None for b in parsed["blocks"])
     assert any(b["type"] == "table" for b in parsed["blocks"])

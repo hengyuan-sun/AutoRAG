@@ -52,6 +52,8 @@ def test_http_closed_loop_and_job_errors(client):
     assert c.post(f"/api/v1/releases/{release['id']}/activate", json={"expected_release_id": None}).status_code == 200
     assert c.post("/api/v1/search", json={"kb_id": kb["id"], "query": "温度"}).json()["release_id"] == release["id"]
     assert c.post("/api/v1/experiments", json=dict(payload, variants=[])).status_code == 422
+    assert c.post("/api/v1/experiments", json=dict(payload, variants=[
+        {"strategy": "table", "length": 100, "overlap": 1}])).status_code == 422
     bad = c.post("/api/v1/ingestions", data={"kb_id": kb["id"]}, files={"file": ("x.exe", b"MZ")})
     assert bad.status_code == 422
 
@@ -64,3 +66,32 @@ def test_raw_file_stream_and_json_dataset_validation(client):
                       headers={"Content-Type": "application/octet-stream"})
     assert response.status_code == 201
     assert c.post("/api/v1/golden-datasets", json={"kb_id": kb["id"], "name": "bad", "items": []}).status_code == 422
+
+
+def test_multipart_upload_uses_configured_single_file_limit(tmp_path):
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'small.db'}", storage=tmp_path,
+                        vector_dim=3, api_token="admin", max_file_bytes=4)
+    lab = Lab(settings, TestEmbedder())
+    with TestClient(create_app(settings, lab, start_worker=False)) as c:
+        c.headers["Authorization"] = "Bearer admin"
+        kb = c.post("/api/v1/knowledge-bases", json={"name": "size"}).json()
+        ok = c.post("/api/v1/ingestions", data={"kb_id": kb["id"]}, files={"file": ("ok.txt", b"1234")})
+        too_large = c.post("/api/v1/ingestions", data={"kb_id": kb["id"]}, files={"file": ("large.txt", b"12345")})
+        raw_too_large = c.post(f"/api/v1/ingestions/raw?kb_id={kb['id']}&file_name=large.txt",
+                               content=b"12345", headers={"Content-Type": "application/octet-stream"})
+        assert ok.status_code == 201
+        assert too_large.status_code == 413
+        assert raw_too_large.status_code == 413
+
+
+def test_default_file_limit_is_500_mib():
+    assert Settings().max_file_bytes == 500 * 1024 * 1024
+
+
+def test_presets_api_exposes_strategy_specific_labels(client):
+    c, _ = client
+    c.headers["Authorization"] = "Bearer admin"
+    rows = {row["id"]: row for row in c.get("/api/v1/presets").json()}
+    assert rows["recursive"]["length_label"] == "单块最大长度（字符）"
+    assert rows["window"]["length_label"] == "固定窗口长度（字符）"
+    assert rows["table"]["overlap_supported"] is False

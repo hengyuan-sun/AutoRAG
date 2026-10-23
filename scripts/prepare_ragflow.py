@@ -17,12 +17,22 @@ def main():
     if current != REVISION:
         raise SystemExit("上游提交不匹配，停止以免覆盖用户代码")
     marker = repo / ".raglab-bridge.json"
+    source = ROOT / "patches" / "ragflow-parser-bridge" / "main.go"
+    destination = repo / "cmd" / "raglab-parser" / "main.go"
     if marker.exists():
-        print("桥接已准备；构建状态仍需单独验证")
+        metadata = json.loads(marker.read_text(encoding="utf-8"))
+        if metadata.get("revision") != REVISION:
+            raise SystemExit("桥接标记版本不匹配，停止覆盖")
+        if not destination.exists():
+            raise SystemExit("桥接标记存在但源码缺失，停止修复")
+        if destination.read_bytes() != source.read_bytes():
+            shutil.copy2(source, destination)
+        metadata["bridge_version"] = "1.1"
+        marker.write_text(json.dumps(metadata), encoding="utf-8")
+        print("桥接源码已与平台patch同步；构建状态仍需单独验证")
         return
     if subprocess.check_output(["git", "-C", str(repo), "status", "--porcelain"], text=True).strip():
         raise SystemExit("上游有未提交更改，请先处理，脚本不会覆盖")
-    source = ROOT / "patches" / "ragflow-parser-bridge" / "main.go"
     destination = repo / "cmd" / "raglab-parser"
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination / "main.go")

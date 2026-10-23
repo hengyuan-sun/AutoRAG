@@ -21,7 +21,8 @@ from starlette.concurrency import run_in_threadpool
 from .chunking import presets
 from .config import Settings
 from .golden import GoldenItem
-from .persistence import uid
+from .parsing import probe_ragflow
+from .persistence import FileTooLargeError, uid
 from .service import Lab
 
 
@@ -38,13 +39,15 @@ class Variant(BaseModel):
     def check_overlap(self):
         if self.overlap >= self.length:
             raise ValueError("重叠必须小于长度")
+        if self.strategy == "table" and self.overlap:
+            raise ValueError("表格行组不支持重叠")
         return self
 
 
 class ExperimentBody(BaseModel):
     kb_id: str
     document_ids: list[str] = Field(min_length=1, max_length=500)
-    parser: Literal["local", "ragflow"] = "local"
+    parser: str = Field(default="local", min_length=1, max_length=40)
     variants: list[Variant] = Field(min_length=1, max_length=20)
 
 
@@ -131,6 +134,10 @@ def create_app(settings=None, lab=None, start_worker=True):
         return JSONResponse(status_code=409 if "冲突" in message or "幂等" in message else 422,
                             content={"code": "INVALID_REQUEST", "message": message})
 
+    @app.exception_handler(FileTooLargeError)
+    async def file_too_large(_, exc):
+        return JSONResponse(status_code=413, content={"code": "FILE_TOO_LARGE", "message": str(exc)})
+
     @app.exception_handler(IntegrityError)
     async def conflict(_, exc):
         return JSONResponse(status_code=409, content={"code": "CONFLICT", "message": "资源或任务已存在，请查询后重试"})
@@ -150,8 +157,13 @@ def create_app(settings=None, lab=None, start_worker=True):
             model = {"available": True, **binding}
         except Exception:
             model = {"available": False, "model": settings.embed_model}
+        ragflow_health = probe_ragflow(settings.ragflow_url, settings.ragflow_token,
+                                       f"ragflow@{settings.ragflow_revision}")
         return {"database": "postgresql+pgvector" if lab.store.pg else "sqlite-test",
-                "model": model, "parsers": {"local": True, "ragflow_configured": bool(settings.ragflow_url)},
+                "model": model, "parsers": {"local": True, "mineu_reserved": True,
+                                             "ragflow_configured": bool(settings.ragflow_url),
+                                             "ragflow_available": ragflow_health["available"],
+                                             "ragflow_parser": ragflow_health["parser"]},
                 "token_budget_available": False, "reranker_available": False,
                 "obs_connector": "reserved", "workspace": workspace}
 
@@ -175,11 +187,8 @@ def create_app(settings=None, lab=None, start_worker=True):
     def ingest(kb_id: str = Form(...), file: UploadFile = File(...), source: str = Form("manual"),
                external_id: str = Form(""), revision: str = Form(""), workspace=Depends(auth)):
         lab.store.get(kb_id, workspace, "knowledge_base")
-        # 未显式给source revision时使用内容hash，上传修改文件产生新修订。
-        blob_hash = lab.blobs.put(file.file)
-        file.file.seek(0)
         return lab.ingest(workspace, kb_id, file.filename or "upload.txt", file.file, source,
-                          external_id or file.filename or "upload", revision or blob_hash)
+                          external_id or file.filename or "upload", revision)
 
     @app.post("/api/v1/ingestions/raw", status_code=201)
     async def raw_ingest(request: Request, kb_id: str, file_name: str = Query(max_length=255),
@@ -199,7 +208,7 @@ def create_app(settings=None, lab=None, start_worker=True):
                                           source, external_id or file_name, revision or sha.hexdigest())
 
     @app.get("/api/v1/documents/{id}/parsed")
-    def parsed(id: str, parser: Literal["local", "ragflow"] = "local", workspace=Depends(auth)):
+    def parsed(id: str, parser: str = "local", workspace=Depends(auth)):
         return lab.parsed(workspace, id, parser)
 
     def enqueue(workspace, kind, body, key):
@@ -207,6 +216,8 @@ def create_app(settings=None, lab=None, start_worker=True):
 
     @app.post("/api/v1/experiments", status_code=202)
     def experiments(body: ExperimentBody, workspace=Depends(auth), idempotency_key: str = Header(default="")):
+        if body.parser not in lab.parser_adapters:
+            raise ValueError("所选解析器未注册或未配置")
         lab.store.get(body.kb_id, workspace, "knowledge_base")
         for id in body.document_ids:
             doc = lab.store.get(id, workspace, "document")

@@ -16,14 +16,16 @@
 - M4 发布回滚与任务：完成首期，包含租约写入fencing、发布门槛及CAS回滚。
 - M5 前端、端到端及文档：完成首期，Vitest、Playwright和生产构建通过。
 - M6 独立审查与交付：完成，4项评审问题已修复并增加7个回归用例；已提交并推送至`origin/feat/rag-lab`。
+- M7 本轮修复：五策略预设与互斥参数校验、本地PPTX文本/形状定位、默认500MiB上传上限、原文Chunk高亮、RAGFlow固定SHA桥接契约及mineU适配预留；已增加回归测试。
 
-## 验证记录（2026-10-22）
+## 验证记录（2026-10-23）
 
-- `.venv\\Scripts\\python.exe -m pytest -q --tb=short`：36 passed，1 skipped（真实依赖专项默认跳过）。
+- `.venv\\Scripts\\python.exe -m pytest -q --tb=short`：45 passed，1 skipped（真实依赖专项默认跳过）。
 - `$env:RAGLAB_RUN_INTEGRATION='1'; .venv\\Scripts\\python.exe -m pytest tests/test_live.py -q --tb=short`：1 passed；本地Ollama、独立PostgreSQL数据库与pgvector真实向量检索、评测、发布、重启后查询均覆盖。
-- `frontend\\pnpm test`：1 passed；`frontend\\pnpm build`：Vue类型检查和Vite生产构建通过。
+- `frontend\\pnpm test`：3 passed；`frontend\\pnpm build`：Vue类型检查和Vite生产构建通过。
 - `frontend\\pnpm test:e2e`：1 passed；真实浏览器操作文件试验、黄金集导入、评测、发布、切换和回滚。
 - `.venv\\Scripts\\ruff.exe check src tests scripts`：通过。
+- 新增RAGFlow契约、PPTX、策略参数、500MiB阈值与mineU适配注入测试通过；桥接源码已生成但Go工具链下载超时，真实Go编译和RAGFlow服务端到端测试未完成。
 - 新增评审回归：7 passed；首轮7失败用于确认缺陷已被测试捕获。
 
 ## 评审修复

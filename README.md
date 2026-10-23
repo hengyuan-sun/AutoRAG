@@ -7,9 +7,9 @@ RAGFlow采用冻结Go源码的独立解析桥接；当前交付包含桥接源�
 
 ## 已实现
 
-- TXT、Markdown、DOCX、文本PDF摄入和流式接收，文档身份/内容修订和幂等冲突检查。
+- TXT、Markdown、DOCX、文本PDF、PPTX摄入和流式接收，单文件默认上限500 MiB，文档身份/内容修订和幂等冲突检查。
 - 本地基线解析与显式RAGFlow桥接适配；未配置RAGFlow时不静默降级。
-- 递归、滑动窗口、标题条款、FAQ、表格行组五种切分，原文字符区间与重复表头追溯。
+- 递归、滑动窗口、标题条款、FAQ、表格行组五种切分预设；参数标签随策略切换。支持文本原文定位、高亮和PPTX文本框位置展示。
 - 持久化任务、Worker租约/心跳、解析和Embedding缓存、最多20组参数扫描。
 - 真实Ollama Embedding，按模型digest绑定索引；pgvector精确检索、中文BM25及RRF融合。
 - JSON/CSV黄金集、逐题Trace、文档Recall/Hit/MRR/nDCG和证据Recall/Precision/IoU。

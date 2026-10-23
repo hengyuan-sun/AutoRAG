@@ -12,18 +12,24 @@ from .chunking import chunk_document, presets
 from .golden import GoldenItem
 from .metrics import assemble, evidence_metrics, ranking_metrics, rrf
 from .models import Ollama
-from .parsing import parse_local, parse_ragflow
+from .parsing import LocalParserAdapter, RagflowParserAdapter
 from .persistence import BlobStore, Store, digest, uid
 from .retrieval import bm25
 
 
 class Lab:
-    def __init__(self, settings, embedder=None):
+    def __init__(self, settings, embedder=None, parser_adapters=None):
         self.settings = settings
         settings.storage.mkdir(parents=True, exist_ok=True)
         self.store = Store(settings.database_url, settings.vector_dim)
         self.blobs = BlobStore(settings.storage / "blobs", settings.max_file_bytes)
         self.embedder = embedder or Ollama(settings.ollama_url, settings.embed_model, settings.vector_dim)
+        self.parser_adapters = {
+            "local": LocalParserAdapter(),
+            "ragflow": RagflowParserAdapter(settings.ragflow_url, settings.ragflow_token,
+                                             f"ragflow@{settings.ragflow_revision}"),
+        }
+        self.parser_adapters.update(parser_adapters or {})
 
     def _cached(self, kind, workspace, key, compute):
         old = self.store.by_key(kind, workspace, key)
@@ -40,12 +46,13 @@ class Lab:
             raise ValueError("知识库名称不能为空且不超过100字")
         return self.store.create("knowledge_base", workspace, {"name": name})
 
-    def ingest(self, workspace, kb_id, name, stream, source, external_id, revision):
+    def ingest(self, workspace, kb_id, name, stream, source, external_id, revision=""):
         self.store.get(kb_id, workspace, "knowledge_base")
         name = name.replace("\\", "/").split("/")[-1]
-        if Path(name).suffix.lower() not in {".txt", ".md", ".docx", ".pdf"}:
+        if Path(name).suffix.lower() not in {".txt", ".md", ".docx", ".pdf", ".pptx"}:
             raise ValueError("不支持此文件类型")
         hash_ = self.blobs.put(stream)
+        revision = revision or hash_
         key = digest([kb_id, source, external_id, revision])
         data = {"kb_id": kb_id, "name": name, "hash": hash_, "source": source,
                 "external_id": external_id, "source_revision": revision,
@@ -73,16 +80,14 @@ class Lab:
 
     def parsed(self, workspace, document_id, parser):
         doc = self.store.get(document_id, workspace, "document")
-        key = digest([document_id, doc["data"]["hash"], parser, "1", self.settings.ragflow_url])
+        adapter = self.parser_adapters.get(parser)
+        if adapter is None:
+            raise ValueError("未注册所选解析器")
+        key = digest([document_id, doc["data"]["hash"], parser, adapter.version])
 
         def compute():
-            raw = self.blobs.read(doc["data"]["hash"])
-            if parser == "local":
-                return parse_local(doc["data"]["name"], raw, document_id)
-            if parser == "ragflow":
-                return parse_ragflow(doc["data"]["name"], raw, document_id,
-                                     self.settings.ragflow_url, self.settings.ragflow_token)
-            raise ValueError("未知解析器")
+            with self.blobs.open(doc["data"]["hash"]) as raw:
+                return adapter.parse(doc["data"]["name"], raw, document_id)
 
         return self._cached("parse_snapshot", workspace, key, compute)
 
@@ -108,7 +113,7 @@ class Lab:
             return old
         data = {"kb_id": kb_id, "document_ids": document_ids, "parser": parser, "config": config,
                 "model_binding": binding, "status": "BUILDING", "backend": "pgvector" if self.store.pg else "sqlite-test",
-                "schema_version": 1, "config_hash": digest([config, binding, parser]), "chunker_version": "1.0"}
+                "schema_version": 1, "config_hash": digest([config, binding, parser]), "chunker_version": "1.1"}
         trial = old or self.store.create("trial", workspace, data, key)
         chunks, snapshots = [], []
         for document_id in document_ids:

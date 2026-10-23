@@ -4,7 +4,7 @@ import httpx
 import pytest
 from docx import Document
 
-from raglab.parsing import parse_local, parse_ragflow
+from raglab.parsing import parse_local, parse_ragflow, probe_ragflow
 
 
 def test_docx_preserves_table_order():
@@ -36,3 +36,34 @@ def test_ragflow_protocol_does_not_silently_fallback(monkeypatch):
     monkeypatch.setattr(httpx, "Client", lambda **kw: original_client(transport=httpx.MockTransport(handler)))
     with pytest.raises(ValueError, match="契约"):
         parse_ragflow("x.txt", b"hello", "r", "http://bridge", "bridge-secret")
+
+
+def test_ragflow_requires_exact_frozen_bridge_revision(monkeypatch):
+    original_client = httpx.Client
+
+    def handler(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"parser": "ragflow@wrong", "bridge_version": "1.0"})
+        return httpx.Response(200, json={"parser": "ragflow@wrong", "revision": "r",
+                                         "schema_version": 1, "blocks": [{"id": "b0", "text": "x"}]})
+
+    monkeypatch.setattr(httpx, "Client", lambda **kw: original_client(transport=httpx.MockTransport(handler)))
+    assert probe_ragflow("http://bridge", "secret", "ragflow@pinned") == {
+        "available": False, "parser": "ragflow@wrong"}
+    with pytest.raises(ValueError, match="契约"):
+        parse_ragflow("x.txt", b"hello", "r", "http://bridge", "secret", "ragflow@pinned")
+
+
+def test_ragflow_health_and_parse_accept_only_matching_bridge(monkeypatch):
+    original_client = httpx.Client
+
+    def handler(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"parser": "ragflow@pinned", "bridge_version": "1.1"})
+        return httpx.Response(200, json={"schema_version": 1, "parser": "ragflow@pinned", "revision": "r",
+                                         "blocks": [{"id": "b0", "text": "有效文本", "slide": 1}]})
+
+    monkeypatch.setattr(httpx, "Client", lambda **kw: original_client(transport=httpx.MockTransport(handler)))
+    assert probe_ragflow("http://bridge", "secret", "ragflow@pinned")["available"] is True
+    parsed = parse_ragflow("x.txt", b"hello", "r", "http://bridge", "secret", "ragflow@pinned")
+    assert parsed["blocks"][0]["text"] == "有效文本"
