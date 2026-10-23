@@ -20,9 +20,24 @@ test('真实界面：上传 → 参数试验 → 黄金评测 → 发布 → 历
   await page.getByLabel('切分预设').selectOption('recursive')
   await expect(page.getByText('单块最大长度（字符）')).toBeVisible()
   await expect(page.getByLabel('切分长度')).toHaveValue('400;800;1200')
-  await page.locator('input[type=file]').first().setInputFiles({name: '工艺规范.txt', mimeType: 'text/plain',
-    buffer: Buffer.from('焊接规范\n\n焊接温度保持80摄氏度。作业前必须完成安全检查并佩戴防护装备。')})
-  await expect(page.getByText('工艺规范.txt', {exact: true})).toBeVisible()
+  await page.locator('input[type=file]').first().setInputFiles({name: '合成焊接规范.pptx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    buffer: fs.readFileSync(path.resolve('tests/fixtures/synthetic-welding-procedure.pptx'))})
+  await expect(page.getByText('合成焊接规范.pptx', {exact: true})).toBeVisible()
+  await page.getByRole('button', {name: '预览', exact: true}).click()
+  await expect(page.getByRole('heading', {name: 'DocumentIR结构浏览'})).toBeVisible()
+  await page.locator('.ir-item-list .ir-item').first().click()
+  await expect(page.locator('.source-viewer .highlighted')).toBeVisible()
+  await page.getByRole('button', {name: '新建', exact: true}).click()
+  await page.getByLabel('Profile名称').fill('浏览器消费样例')
+  await page.getByLabel('输出字段key').fill('procedure_text')
+  await page.getByLabel('IR字段路径').fill('items[*].text')
+  await page.getByRole('textbox', {name: 'Profile条目类型'}).fill('paragraph')
+  await page.getByRole('button', {name: '添加字段'}).click()
+  await page.getByRole('button', {name: '创建Profile'}).click()
+  await page.getByRole('button', {name: '预览消费结果'}).click()
+  await expect(page.getByLabel('消费字段预览')).toContainText('procedure_text')
+  await expect(page.getByLabel('消费字段预览')).toContainText('焊接温度')
   await page.getByLabel('切分长度', {exact: true}).fill('100;200')
   await page.getByLabel('重叠字符').fill('0')
   await page.getByRole('button', {name: '▶ 运行处理试验'}).click()
@@ -30,12 +45,16 @@ test('真实界面：上传 → 参数试验 → 黄金评测 → 发布 → 历
   await expect(page.locator('.chunk-grid article').first()).toBeVisible()
   await page.getByRole('button', {name: '定位Chunk 01原文'}).click()
   await expect(page.locator('.source-viewer mark').first()).toBeVisible()
-  await expect(page.locator('.source-viewer')).toContainText('local-baseline@2')
+  await expect(page.locator('.source-viewer')).toContainText('docling')
   const kbId = await page.getByLabel('当前知识库').inputValue()
   const docsResponse = await request.get(`http://127.0.0.1:8018/api/v1/knowledge-bases/${kbId}/documents`, {headers: {Authorization: `Bearer ${token}`}})
   const docs = await docsResponse.json()
+  const irResponse = await request.get(`http://127.0.0.1:8018/api/v1/documents/${docs[0].id}/ir/items?parser=docling&type=paragraph`,
+    {headers: {Authorization: `Bearer ${token}`}})
+  const sourceItem = (await irResponse.json()).items[0]
   const golden = [{id: 'q1', query: '焊接温度是多少', relevant_documents: [docs[0].id],
-    evidence: [{document_id: docs[0].id, block_id: 'b1', start: 0, end: 14}]}]
+    evidence: [{document_id: docs[0].id, block_id: sourceItem.uid, start: 0,
+      end: Math.min(14, Array.from(sourceItem.text).length)}]}]
   await page.getByRole('button', {name: '黄金集与评测'}).click()
   await page.getByLabel('黄金集JSON').fill(JSON.stringify(golden))
   await page.getByRole('button', {name: '保存黄金集', exact: true}).click()

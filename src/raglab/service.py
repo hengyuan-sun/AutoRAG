@@ -418,7 +418,11 @@ class Lab:
         blocks = {}
         for doc_id in trial["data"]["document_ids"]:
             parsed = self.parsed(workspace, doc_id, trial["data"]["parser"])
-            blocks.update({(doc_id, b["id"]): len(b["text"]) for b in parsed["blocks"]})
+            if parsed.get("schema_version") == "1.5":
+                ir_blocks = to_chunking_document(DocumentIR.model_validate(parsed), doc_id)["blocks"]
+            else:
+                ir_blocks = parsed["blocks"]
+            blocks.update({(doc_id, block["id"]): len(block["text"]) for block in ir_blocks})
         for item in golden["data"]["items"]:
             error, trace = None, None
             try:

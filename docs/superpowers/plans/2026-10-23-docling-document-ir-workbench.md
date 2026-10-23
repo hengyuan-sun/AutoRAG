@@ -171,12 +171,12 @@
 - Selecting an IR item from a Chunk navigates to its item and highlights exact source text when spans are available; unavailable visual location is labeled rather than approximated.
 - Docling is the default parser option. Keep legacy local snapshots readable; remove the RAGFlow bridge option and diagnostics state.
 
-- [ ] **Step 1: Write failing Vitest tests** `consumerProfiles.test.ts` for field selector validation and output/source metadata display helpers.
-- [ ] **Step 2: Run** `pnpm test -- --run src/consumerProfiles.test.ts` and verify module-not-found or expected missing behavior.
-- [ ] **Step 3: Implement the helper types and components** with accessibility labels, keyboard-operable tree controls and bounded item pagination.
-- [ ] **Step 4: Add Playwright coverage** `workbench.spec.ts`: upload a synthetic PPTX/PDF fixture, run Docling parsing and a chunking experiment, inspect an IR item and source position, choose a business field profile, preview mapped output with provenance, then complete golden evaluation, publish and rollback.
-- [ ] **Step 5: Run** `pnpm test`, `pnpm build`, and `pnpm test:e2e` from `frontend`.
-- [ ] **Step 6: Commit** the IR workbench UI and browser tests as `feat: add DocumentIR and consumer profile workbench`.
+- [x] **Step 1: Write failing Vitest tests** `consumerProfiles.test.ts` for field selector validation and output/source metadata display helpers.
+- [x] **Step 2: Run** `pnpm test -- --run src/consumerProfiles.test.ts` and verify module-not-found or expected missing behavior.
+- [x] **Step 3: Implement the helper types and components** with accessibility labels, keyboard-operable tree controls and bounded item pagination.
+- [x] **Step 4: Add Playwright coverage** `workbench.spec.ts`: upload a synthetic PPTX/PDF fixture, run Docling parsing and a chunking experiment, inspect an IR item and source position, choose a business field profile, preview mapped output with provenance, then complete golden evaluation, publish and rollback.
+- [x] **Step 5: Run** `pnpm test`, `pnpm build`, and `pnpm test:e2e` from `frontend`.
+- [x] **Step 6: Commit** the IR workbench UI and browser tests as `feat: add DocumentIR and consumer profile workbench`.
 
 ### Task 7: Remove RAGFlow Go bridge and update operational docs
 

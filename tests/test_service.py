@@ -78,6 +78,17 @@ def test_docling_experiment_projects_ir_to_chunks_and_pins_parser_identity(lab):
     assert all(chunk["spans"][0]["item_uid"].startswith("ir_") for chunk in chunks)
     assert chunks[1]["section_path"] == ["安全检查"]
 
+    ir = lab.parsed("w", doc["id"], "docling")
+    paragraph = next(item for item in ir["items"] if item["type"] == "paragraph")
+    golden = lab.import_golden("w", kb["id"], "Docling证据", [{
+        "id": "ir-evidence", "query": "阀门检查", "relevant_documents": [doc["id"]],
+        "evidence": [{"document_id": doc["id"], "block_id": paragraph["uid"],
+                      "start": 0, "end": len(paragraph["text"])}],
+    }])
+    report = lab._evaluate("w", {"trial_id": trial["id"], "golden_id": golden["id"],
+                                  "top_k": 5, "budget": 1000, "mode": "bm25"})
+    assert report["data"]["items"][0]["error"] is None
+
 
 def test_ingest_idempotency_conflict_and_scope(lab):
     kb, doc = setup(lab)

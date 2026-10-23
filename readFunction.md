@@ -179,3 +179,11 @@ Docling解析结果先通过`validate_document_ir`跨引用校验，再以UTF-8�
 `GET/POST /api/v1/consumer-profiles`提供工作区内的配置列表/版本保存，重复POST相同Profile ID会新增不可变版本；GET详情可按version查询。首次访问时为工作区种入通用检索、结构化审查、WPS字段别名样例。样例仅引用源项目字段字典里的稳定字段ID，不复制其文档或业务记录。样例文件位于`tests/fixtures/consumer_profiles/`。
 
 `POST /api/v1/documents/{id}/consumer-preview`返回每个输出字段的值、状态、别名、来源IR UID、provenance/location以及必填字段缺失列表。表格单元映射保留父表UID与单元定位；未提供的页码和坐标保持缺失。`ExperimentBody.consumer_profile_id`在任务入队前解析成明确版本，Worker把Profile字段快照、version和content_hash写入Experiment及Trial，并将快照摘要纳入Trial config hash；Profile后续升级不会改变已排队或已构建Trial的映射契约。发布候选继续沿用源Trial固定的Profile版本。
+
+## DocumentIR浏览与字段映射前端
+
+`DocumentIRViewer.vue`先读取manifest，再按类型和页码分批读取IR条目；选择条目会读取详情关系，并跳转到对应来源块。选择Chunk会把span里的`item_uid`带入浏览器，必要时逐页找到该条目；如果解析器提供`source_spans`，原文视图按Unicode码点区间精确标记，缺少span时只高亮对应块，不生成假坐标。
+
+`ConsumerProfileEditor.vue`从工作区读取Profile模板，允许配置输出key、别名、IR字段路径、条目类型、基数、转换和必填标记；保存同一ID生成新版本，预览固定版本并逐个展示值、来源UID及页码/bbox/字符范围。`consumerProfiles.ts`只在浏览器预检白名单路径并格式化定位；最终授权和schema兼容性仍由Python API校验。
+
+工作台默认选择Docling，兼容解析基线仍可手动选择。Playwright端到端样例使用仓库生成的合成PPTX，覆盖解析、IR条目点击与原文块高亮、自定义Profile创建及预览、Trial切分、黄金集评测、候选发布和历史回滚。扫描PDF所需本地Docling模型资产当前未安装，因此本轮浏览器闭环不声称验证了扫描PDF/OCR。
