@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .chunking import presets
 from .config import Settings
+from .document_ir.chunk_projection import to_chunking_document
 from .golden import GoldenItem
 from .parsing import probe_ragflow
 from .persistence import FileTooLargeError, uid
@@ -209,7 +210,29 @@ def create_app(settings=None, lab=None, start_worker=True):
 
     @app.get("/api/v1/documents/{id}/parsed")
     def parsed(id: str, parser: str = "local", workspace=Depends(auth)):
-        return lab.parsed(workspace, id, parser)
+        payload = lab.parsed(workspace, id, parser)
+        if isinstance(payload, dict) and payload.get("schema_version") == "1.5":
+            from .document_ir.models import DocumentIR
+            ir = DocumentIR.model_validate(payload)
+            payload = dict(payload, blocks=to_chunking_document(ir, id)["blocks"])
+        return payload
+
+    @app.get("/api/v1/documents/{id}/ir")
+    def document_ir_manifest(id: str, parser: str = "docling", workspace=Depends(auth)):
+        return lab.document_ir_manifest(workspace, id, parser)
+
+    @app.get("/api/v1/documents/{id}/ir/items")
+    def document_ir_items(id: str, parser: str = "docling", page: int = Query(default=1, ge=1),
+                          page_size: int = Query(default=100, ge=1, le=500),
+                          type: str | None = Query(default=None, max_length=30), workspace=Depends(auth)):
+        if type is not None and type not in {"heading", "paragraph", "table", "image", "formula",
+                                             "toc_entry", "header_footer"}:
+            raise ValueError("不支持的DocumentIR条目类型")
+        return lab.document_ir_items(workspace, id, parser, page, page_size, type)
+
+    @app.get("/api/v1/documents/{id}/ir/items/{item_uid}")
+    def document_ir_item(id: str, item_uid: str, parser: str = "docling", workspace=Depends(auth)):
+        return lab.document_ir_item(workspace, id, parser, item_uid)
 
     def enqueue(workspace, kind, body, key):
         return lab.store.enqueue(workspace, kind, body.model_dump(), key or uid())

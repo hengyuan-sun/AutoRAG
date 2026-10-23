@@ -272,6 +272,14 @@ class BlobStore:
         with self.open(hash_) as stream:
             return stream.read()
 
+    def read_verified(self, hash_):
+        """Read a content-addressed artifact only after checking its bytes against its key."""
+        with self.open(hash_) as stream:
+            content = stream.read()
+        if hashlib.sha256(content).hexdigest() != hash_:
+            raise ValueError("产物哈希校验失败")
+        return content
+
     def open(self, hash_):
         if not re.fullmatch(r"[a-f0-9]{64}", hash_):
             raise ValueError("无效产物标识")

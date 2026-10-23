@@ -165,3 +165,9 @@ API契约测试使用隔离HTTP传输检查字段与拒绝错误revision，不�
 精确Tokenizer、父子/语义算法、公开基准下载适配、完整GatePolicy、OBS/来源ACL、
 Milvus备用路径、产物GC、备份恢复脚本及RAGFlow运行验证继续按v3里程碑推进。
 当前交付是三个本地研发闭环首个可运行版本，不等于v3全范围或生产验收完成。
+
+## DocumentIR产物与查询API
+
+Docling解析结果先通过`validate_document_ir`跨引用校验，再以UTF-8紧凑JSON写入临时文件，并由`BlobStore.put`分块计算SHA-256后写入内容寻址Blob目录。`parse_snapshot`关系记录只保存schema、解析器身份、条目/页数及产物哈希和大小，不持有整份items数组；读取时`BlobStore.read_verified`核对内容哈希，再执行Pydantic模型与IR引用校验。解析缓存键含文档ID、源文件hash、解析器版本，因此不同解析器版本生成不同快照。临时序列化文件在成功或异常时都会删除。
+
+`GET /api/v1/documents/{id}/ir`只返回manifest摘要；`/ir/items`限制页码和每页最多500项，可按条目类型过滤，并回传同一个`ir_sha256`供客户端确认分页来自相同产物；`/ir/items/{uid}`返回目标项、相关关系及来源/定位信息。所有读取先按当前workspace加载文档，跨workspace资源统一返回404。原`/parsed`接口仍提供完整IR数据，并附加`to_chunking_document`生成的兼容`blocks`，既有切分调用方无需直接依赖Docling对象。旧格式解析快照仍按原样读取；旧的内联DocumentIR快照在新接口读取时校验并升级为Blob产物。

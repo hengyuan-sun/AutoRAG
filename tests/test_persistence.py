@@ -18,10 +18,19 @@ def test_records_are_scoped_and_blobs_content_addressed(tmp_path):
     assert one == blobs.put(io.BytesIO(b"hello"))
     assert one == hashlib.sha256(b"hello").hexdigest()
     assert blobs.read(one) == b"hello"
+    assert blobs.read_verified(one) == b"hello"
     with pytest.raises(ValueError):
         blobs.put(io.BytesIO(b"x" * 11))
     with pytest.raises(ValueError):
         blobs.read("../db")
+
+
+def test_blob_verified_read_detects_corruption(tmp_path):
+    blobs = BlobStore(tmp_path / "blobs", 100)
+    key = blobs.put(io.BytesIO(b"original"))
+    (tmp_path / "blobs" / key).write_bytes(b"changed")
+    with pytest.raises(ValueError, match="哈希校验"):
+        blobs.read_verified(key)
 
 
 def test_job_lease_and_publish_cas(tmp_path):

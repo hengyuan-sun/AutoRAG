@@ -120,13 +120,13 @@
 - `GET /api/v1/documents/{id}/parsed` remains compatible for existing callers and derives legacy `blocks` from IR.
 - IR payloads are stored as content-addressed JSON artifacts; resource records hold workspace-scoped metadata and artifact references. All reads enforce workspace and document ownership.
 
-- [ ] **Step 1: Write failing API tests** `test_ir_api_paginates_items_and_reports_stable_manifest`, `test_ir_item_api_returns_provenance_and_relations`, and `test_ir_api_rejects_cross_workspace_access`.
-- [ ] **Step 2: Run** `.venv\Scripts\python.exe -m pytest tests/test_document_ir_api.py -q` and verify the missing-route behavior.
-- [ ] **Step 3: Implement content-addressed IR persistence** with hash verification and JSON encoding; do not inline raw upload bytes or media artifacts in the relational record.
-- [ ] **Step 4: Implement the workspace-scoped manifest, item-page and item-detail routes** with bounds on page size and response size.
-- [ ] **Step 5: Preserve and test the existing parsed endpoint response** using an old local-baseline fixture.
-- [ ] **Step 6: Run** `.venv\Scripts\python.exe -m pytest tests/test_document_ir_api.py tests/test_api.py tests/test_persistence.py -q`.
-- [ ] **Step 7: Commit** the persisted IR artifacts and inspection routes as `feat: expose persisted DocumentIR inspection API`.
+- [x] **Step 1: Write failing API tests** `test_ir_api_paginates_items_and_reports_stable_manifest`, `test_ir_item_api_returns_provenance_and_relations`, and `test_ir_api_rejects_cross_workspace_access`.
+- [x] **Step 2: Run** `.venv\Scripts\python.exe -m pytest tests/test_document_ir_api.py -q` and verify the missing-route behavior.
+- [x] **Step 3: Implement content-addressed IR persistence** with hash verification and JSON encoding; do not inline raw upload bytes or media artifacts in the relational record.
+- [x] **Step 4: Implement the workspace-scoped manifest, item-page and item-detail routes** with bounds on page size and response size.
+- [x] **Step 5: Preserve and test the existing parsed endpoint response** using an old local-baseline fixture.
+- [x] **Step 6: Run** `.venv\Scripts\python.exe -m pytest tests/test_document_ir_api.py tests/test_api.py tests/test_persistence.py -q`.
+- [x] **Step 7: Commit** the persisted IR artifacts and inspection routes as `feat: expose persisted DocumentIR inspection API`.
 
 ### Task 5: Add versioned Consumer Profiles and preview API
 

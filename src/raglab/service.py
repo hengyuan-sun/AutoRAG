@@ -13,6 +13,7 @@ from .chunking import chunk_document, presets
 from .document_ir.chunk_projection import to_chunking_document
 from .document_ir.docling_adapter import DoclingOptions, DoclingParserAdapter
 from .document_ir.models import DocumentIR
+from .document_ir.validation import validate_document_ir
 from .golden import GoldenItem
 from .metrics import assemble, evidence_metrics, ranking_metrics, rrf
 from .models import Ollama
@@ -106,14 +107,98 @@ class Lab:
                             while part := raw.read(65536):
                                 staged.write(part)
                     parsed = adapter.parse(doc["data"]["name"], temp_path, document_id)
-                    return parsed.model_dump(mode="json") if hasattr(parsed, "model_dump") else parsed
+                    return self._snapshot_payload(parsed, adapter.version)
                 finally:
                     if temp_path is not None:
                         temp_path.unlink(missing_ok=True)
             with self.blobs.open(doc["data"]["hash"]) as raw:
-                return adapter.parse(doc["data"]["name"], raw, document_id)
+                return self._snapshot_payload(adapter.parse(doc["data"]["name"], raw, document_id),
+                                              adapter.version)
 
-        return self._cached("parse_snapshot", workspace, key, compute)
+        payload = self._cached("parse_snapshot", workspace, key, compute)
+        if isinstance(payload, dict) and "ir_artifact" in payload:
+            return json.loads(self.blobs.read_verified(payload["ir_artifact"]["sha256"]))
+        return payload
+
+    def _snapshot_payload(self, parsed, parser_identity=None):
+        if not isinstance(parsed, DocumentIR):
+            return parsed.model_dump(mode="json") if hasattr(parsed, "model_dump") else parsed
+        validate_document_ir(parsed)
+        encoder = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"))
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.settings.storage,
+                                             delete=False) as staged:
+                temp_path = Path(staged.name)
+                for part in encoder.iterencode(parsed.model_dump(mode="json")):
+                    staged.write(part)
+            with temp_path.open("rb") as stream:
+                artifact_hash = self.blobs.put(stream)
+            size = temp_path.stat().st_size
+            return {"schema_version": parsed.schema_version,
+                    "ir_artifact": {"sha256": artifact_hash, "size_bytes": size,
+                                     "media_type": "application/vnd.autorag.document-ir+json"},
+                    "item_count": len(parsed.items) + len(parsed.toc) + len(parsed.header_footer),
+                    "page_count": len(parsed.pages) or parsed.engine_info.pages or 0,
+                    "parser_identity": parser_identity or
+                    parsed.engine_info.engine + "@" + parsed.engine_info.engine_version}
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    def document_ir(self, workspace, document_id, parser):
+        doc = self.store.get(document_id, workspace, "document")
+        self.parsed(workspace, document_id, parser)
+        adapter = self.parser_adapters[parser]
+        key = digest([document_id, doc["data"]["hash"], parser, adapter.version])
+        snapshot = self.store.by_key("parse_snapshot", workspace, key)
+        if not snapshot:
+            raise KeyError("IR快照不存在")
+        data = snapshot["data"]
+        artifact_ref = data.get("ir_artifact")
+        if not artifact_ref:
+            payload = self.parsed(workspace, document_id, parser)
+            ir = validate_document_ir(DocumentIR.model_validate(payload))
+            # Upgrade snapshots created before artifact-backed storage.
+            stored = self._snapshot_payload(ir)
+            snapshot = self.store.replace(snapshot["id"], workspace, stored)
+            data, artifact_ref = snapshot["data"], stored["ir_artifact"]
+        raw = self.blobs.read_verified(artifact_ref["sha256"])
+        ir = validate_document_ir(DocumentIR.model_validate_json(raw))
+        return ir, artifact_ref, data
+
+    def document_ir_manifest(self, workspace, document_id, parser):
+        ir, artifact, metadata = self.document_ir(workspace, document_id, parser)
+        return {"document_id": document_id, "schema_version": ir.schema_version,
+                "parser_identity": metadata.get("parser_identity"),
+                "ir_sha256": artifact["sha256"], "artifact": artifact,
+                "item_count": len(ir.items) + len(ir.toc) + len(ir.header_footer),
+                "page_count": len(ir.pages) or ir.engine_info.pages or 0,
+                "item_counts": {kind: sum(item.type == kind for item in [*ir.items, *ir.toc, *ir.header_footer])
+                                for kind in sorted({item.type for item in [*ir.items, *ir.toc, *ir.header_footer]})},
+                "capability_status": ir.capability_status, "warnings": ir.warnings,
+                "manifest_item_count": ir.manifest_item_count}
+
+    def document_ir_items(self, workspace, document_id, parser, page, page_size, item_type):
+        ir, artifact, _ = self.document_ir(workspace, document_id, parser)
+        items = [item for item in [*ir.items, *ir.toc, *ir.header_footer]
+                 if item_type is None or item.type == item_type]
+        items.sort(key=lambda item: (item.order if item.order is not None else 2**31, item.uid))
+        start = (page - 1) * page_size
+        return {"items": [item.model_dump(mode="json", exclude_none=True)
+                          for item in items[start:start + page_size]],
+                "page": page, "page_size": page_size, "total": len(items),
+                "ir_sha256": artifact["sha256"]}
+
+    def document_ir_item(self, workspace, document_id, parser, item_uid):
+        ir, artifact, _ = self.document_ir(workspace, document_id, parser)
+        item = ir.by_uid(item_uid)
+        if item is None:
+            raise KeyError("IR条目不存在")
+        relations = [relation.model_dump(mode="json", exclude_none=True) for relation in ir.relations
+                     if relation.source_uid == item_uid or relation.target_uid == item_uid]
+        return {"item": item.model_dump(mode="json", exclude_none=True),
+                "relations": relations, "ir_sha256": artifact["sha256"]}
 
     def _embed(self, workspace, texts, binding, role="document"):
         # 以实际输入和digest为缓存身份；不跨工作区复用。
