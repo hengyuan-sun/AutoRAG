@@ -1,0 +1,11 @@
+{
+  "id": "general-retrieval",
+  "name": "通用检索文本",
+  "version": 1,
+  "schema_version": "1.5",
+  "fields": [
+    {"key": "content", "selector": "items[*].text", "item_types": ["heading", "paragraph", "table"], "cardinality": "many", "transform": "identity", "required": true},
+    {"key": "section_path", "selector": "items[*].chapter_path", "item_types": ["heading", "paragraph", "table"], "cardinality": "many", "transform": "join_text"},
+    {"key": "source_page", "selector": "items[*].provenance.page", "item_types": ["heading", "paragraph", "table"], "cardinality": "many", "transform": "identity"}
+  ]
+}

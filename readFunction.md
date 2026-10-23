@@ -171,3 +171,11 @@ Milvus备用路径、产物GC、备份恢复脚本及RAGFlow运行验证继续�
 Docling解析结果先通过`validate_document_ir`跨引用校验，再以UTF-8紧凑JSON写入临时文件，并由`BlobStore.put`分块计算SHA-256后写入内容寻址Blob目录。`parse_snapshot`关系记录只保存schema、解析器身份、条目/页数及产物哈希和大小，不持有整份items数组；读取时`BlobStore.read_verified`核对内容哈希，再执行Pydantic模型与IR引用校验。解析缓存键含文档ID、源文件hash、解析器版本，因此不同解析器版本生成不同快照。临时序列化文件在成功或异常时都会删除。
 
 `GET /api/v1/documents/{id}/ir`只返回manifest摘要；`/ir/items`限制页码和每页最多500项，可按条目类型过滤，并回传同一个`ir_sha256`供客户端确认分页来自相同产物；`/ir/items/{uid}`返回目标项、相关关系及来源/定位信息。所有读取先按当前workspace加载文档，跨workspace资源统一返回404。原`/parsed`接口仍提供完整IR数据，并附加`to_chunking_document`生成的兼容`blocks`，既有切分调用方无需直接依赖Docling对象。旧格式解析快照仍按原样读取；旧的内联DocumentIR快照在新接口读取时校验并升级为Blob产物。
+
+## Consumer Profile字段消费
+
+`document_ir/consumer_profiles.py`用Pydantic校验配置，仅允许`meta.<field>`、`outline[*].<field>`、`items[*].<field>`、`items[*].provenance.<field>`和`items[*].cells[*].<field>`白名单路径；字段名按模型定义检查，条目类型与字段类型不兼容时直接拒绝。转换只有identity、join_text、table_markdown三种，不存在Python表达式、JSONPath脚本或模板执行。
+
+`GET/POST /api/v1/consumer-profiles`提供工作区内的配置列表/版本保存，重复POST相同Profile ID会新增不可变版本；GET详情可按version查询。首次访问时为工作区种入通用检索、结构化审查、WPS字段别名样例。样例仅引用源项目字段字典里的稳定字段ID，不复制其文档或业务记录。样例文件位于`tests/fixtures/consumer_profiles/`。
+
+`POST /api/v1/documents/{id}/consumer-preview`返回每个输出字段的值、状态、别名、来源IR UID、provenance/location以及必填字段缺失列表。表格单元映射保留父表UID与单元定位；未提供的页码和坐标保持缺失。`ExperimentBody.consumer_profile_id`在任务入队前解析成明确版本，Worker把Profile字段快照、version和content_hash写入Experiment及Trial，并将快照摘要纳入Trial config hash；Profile后续升级不会改变已排队或已构建Trial的映射契约。发布候选继续沿用源Trial固定的Profile版本。

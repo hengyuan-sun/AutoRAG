@@ -21,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from .chunking import presets
 from .config import Settings
 from .document_ir.chunk_projection import to_chunking_document
+from .document_ir.consumer_profiles import ConsumerField
 from .golden import GoldenItem
 from .parsing import probe_ragflow
 from .persistence import FileTooLargeError, uid
@@ -49,7 +50,20 @@ class ExperimentBody(BaseModel):
     kb_id: str
     document_ids: list[str] = Field(min_length=1, max_length=500)
     parser: str = Field(default="docling", min_length=1, max_length=40)
+    consumer_profile_id: str | None = Field(default=None, min_length=1, max_length=80)
+    consumer_profile_version: int | None = Field(default=None, ge=1)
     variants: list[Variant] = Field(min_length=1, max_length=20)
+
+
+class ConsumerProfileBody(BaseModel):
+    id: str | None = Field(default=None, min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=100)
+    fields: list[ConsumerField] = Field(min_length=1, max_length=100)
+
+
+class ConsumerPreviewBody(BaseModel):
+    profile_id: str = Field(min_length=1, max_length=80)
+    version: int | None = Field(default=None, ge=1)
 
 
 class GoldenBody(NameBody):
@@ -234,6 +248,24 @@ def create_app(settings=None, lab=None, start_worker=True):
     def document_ir_item(id: str, item_uid: str, parser: str = "docling", workspace=Depends(auth)):
         return lab.document_ir_item(workspace, id, parser, item_uid)
 
+    @app.get("/api/v1/consumer-profiles")
+    def consumer_profiles(workspace=Depends(auth)):
+        return lab.consumer_profiles(workspace)
+
+    @app.post("/api/v1/consumer-profiles", status_code=201)
+    def create_consumer_profile(body: ConsumerProfileBody, workspace=Depends(auth)):
+        return lab.save_consumer_profile(workspace, body.model_dump(exclude_none=True))
+
+    @app.get("/api/v1/consumer-profiles/{profile_id}")
+    def consumer_profile(profile_id: str, version: int | None = Query(default=None, ge=1),
+                         workspace=Depends(auth)):
+        return lab.consumer_profile(workspace, profile_id, version)
+
+    @app.post("/api/v1/documents/{id}/consumer-preview")
+    def consumer_preview(id: str, body: ConsumerPreviewBody, parser: str = "docling",
+                         workspace=Depends(auth)):
+        return lab.consumer_preview(workspace, id, body.profile_id, parser, body.version)
+
     def enqueue(workspace, kind, body, key):
         return lab.store.enqueue(workspace, kind, body.model_dump(), key or uid())
 
@@ -241,6 +273,10 @@ def create_app(settings=None, lab=None, start_worker=True):
     def experiments(body: ExperimentBody, workspace=Depends(auth), idempotency_key: str = Header(default="")):
         if body.parser not in lab.parser_adapters:
             raise ValueError("所选解析器未注册或未配置")
+        if body.consumer_profile_id:
+            profile = lab.consumer_profile(workspace, body.consumer_profile_id,
+                                            body.consumer_profile_version)
+            body.consumer_profile_version = profile["version"]
         lab.store.get(body.kb_id, workspace, "knowledge_base")
         for id in body.document_ids:
             doc = lab.store.get(id, workspace, "document")

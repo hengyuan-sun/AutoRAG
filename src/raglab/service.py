@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .chunking import chunk_document, presets
 from .document_ir.chunk_projection import to_chunking_document
+from .document_ir.consumer_profiles import ConsumerProfile, builtin_profile_templates, preview_profile
 from .document_ir.docling_adapter import DoclingOptions, DoclingParserAdapter
 from .document_ir.models import DocumentIR
 from .document_ir.validation import validate_document_ir
@@ -200,6 +201,53 @@ class Lab:
         return {"item": item.model_dump(mode="json", exclude_none=True),
                 "relations": relations, "ir_sha256": artifact["sha256"]}
 
+    def save_consumer_profile(self, workspace, payload):
+        profile_id = payload.get("id") or "cp_" + uid()
+        old_versions = [row for row in self.store.list("consumer_profile", workspace, limit=10000)
+                        if row["data"]["id"] == profile_id]
+        version = max((row["data"]["version"] for row in old_versions), default=0) + 1
+        profile = ConsumerProfile.model_validate({**payload, "id": profile_id, "version": version})
+        data = profile.model_dump(mode="json")
+        data["content_hash"] = digest(data)
+        return self.store.create("consumer_profile", workspace, data, f"{profile_id}:v{version}")["data"]
+
+    def consumer_profile(self, workspace, profile_id, version=None):
+        self._ensure_builtin_profiles(workspace)
+        rows = [row["data"] for row in self.store.list("consumer_profile", workspace, limit=10000)
+                if row["data"]["id"] == profile_id and
+                (version is None or row["data"]["version"] == version)]
+        if not rows:
+            raise KeyError("Consumer Profile不存在或無权限")
+        return max(rows, key=lambda profile: profile["version"])
+
+    def consumer_profiles(self, workspace):
+        self._ensure_builtin_profiles(workspace)
+        latest = {}
+        for row in self.store.list("consumer_profile", workspace, limit=10000):
+            profile = row["data"]
+            if profile["id"] not in latest or profile["version"] > latest[profile["id"]]["version"]:
+                latest[profile["id"]] = profile
+        return sorted(latest.values(), key=lambda profile: profile["name"].casefold())
+
+    def _ensure_builtin_profiles(self, workspace):
+        existing = {row["data"]["id"] for row in self.store.list("consumer_profile", workspace, limit=10000)}
+        for template in builtin_profile_templates():
+            if template["id"] not in existing:
+                try:
+                    self.save_consumer_profile(workspace, template)
+                except IntegrityError:
+                    # Concurrent first readers may seed the same immutable built-in row.
+                    continue
+
+    def consumer_preview(self, workspace, document_id, profile_id, parser="docling", version=None):
+        stored = self.consumer_profile(workspace, profile_id, version)
+        profile = ConsumerProfile.model_validate({key: value for key, value in stored.items()
+                                                  if key != "content_hash"})
+        ir, artifact, _ = self.document_ir(workspace, document_id, parser)
+        preview = preview_profile(profile, ir)
+        return {**preview, "document_id": document_id, "ir_sha256": artifact["sha256"],
+                "content_hash": stored["content_hash"]}
+
     def _embed(self, workspace, texts, binding, role="document"):
         # 以实际输入和digest为缓存身份；不跨工作区复用。
         actual = [(binding.get("query_prefix", "") if role == "query" else "") + t for t in texts]
@@ -216,7 +264,8 @@ class Lab:
                 cached[index] = {"data": value}
         return [c["data"]["vector"] for c in cached]
 
-    def _build_trial(self, workspace, kb_id, document_ids, parser, config, binding, key):
+    def _build_trial(self, workspace, kb_id, document_ids, parser, config, binding, key,
+                     consumer_profile=None):
         adapter = self.parser_adapters.get(parser)
         if adapter is None:
             raise ValueError("未注册所选解析器")
@@ -226,8 +275,11 @@ class Lab:
         data = {"kb_id": kb_id, "document_ids": document_ids, "parser": parser, "config": config,
                 "parser_identity": adapter.version,
                 "model_binding": binding, "status": "BUILDING", "backend": "pgvector" if self.store.pg else "sqlite-test",
-                "schema_version": 1, "config_hash": digest([config, binding, parser, adapter.version]),
+                "schema_version": 1, "config_hash": digest([config, binding, parser, adapter.version,
+                                                                consumer_profile]),
                 "chunker_version": "1.2"}
+        if consumer_profile:
+            data["consumer_profile"] = consumer_profile
         trial = old or self.store.create("trial", workspace, data, key)
         chunks, snapshots, parse_schemas = [], [], []
         for document_id in document_ids:
@@ -270,8 +322,17 @@ class Lab:
         for variant in payload["variants"]:
             if variant["strategy"] not in {p["id"] for p in presets()} or not 1 <= variant["length"] <= 1600 or not 0 <= variant["overlap"] < variant["length"]:
                 raise ValueError("切分参数无效")
+        profile_snapshot = None
+        if payload.get("consumer_profile_id"):
+            profile = self.consumer_profile(workspace, payload["consumer_profile_id"],
+                                            payload.get("consumer_profile_version"))
+            profile_snapshot = {key: profile[key] for key in ("id", "name", "version", "schema_version",
+                                                               "fields", "content_hash")}
         old = self.store.by_key("experiment", workspace, key)
-        experiment = old or self.store.create("experiment", workspace, dict(payload, model_binding=self.embedder.binding()), key)
+        experiment = old or self.store.create("experiment", workspace,
+                                               dict(payload, model_binding=self.embedder.binding(),
+                                                    consumer_profile=profile_snapshot), key)
+        profile_snapshot = experiment["data"].get("consumer_profile")
         binding = experiment["data"]["model_binding"]
         ids, errors = [], []
         for i, config in enumerate(payload["variants"]):
@@ -280,7 +341,8 @@ class Lab:
                 if adapter is None:
                     raise ValueError("未注册所选解析器")
                 trial = self._build_trial(workspace, payload["kb_id"], payload["document_ids"], payload["parser"],
-                                          config, binding, digest([key, i, adapter.version, config]))
+                                          config, binding, digest([key, i, adapter.version, config,
+                                                                   profile_snapshot]), profile_snapshot)
                 ids.append(trial["id"])
             except (ValueError, http_error_types()) as exc:
                 errors.append({"variant": i, "error": str(exc)[:500]})
@@ -400,7 +462,9 @@ class Lab:
         manifest = self._cached("release_manifest", workspace, key, lambda: {
             "document_ids": [d["id"] for d in self.documents(workspace, kb["id"])]})
         trial = self._build_trial(workspace, kb["id"], manifest["document_ids"], source["data"]["parser"],
-                                  source["data"]["config"], source["data"]["model_binding"], digest([key, "candidate"]))
+                                  source["data"]["config"], source["data"]["model_binding"],
+                                  digest([key, "candidate", source["data"].get("consumer_profile")]),
+                                  source["data"].get("consumer_profile"))
         report = self._evaluate(workspace, {"trial_id": trial["id"], "golden_id": payload["golden_id"],
                                             "top_k": 5, "budget": 2000, "mode": "vector"})
         metrics = report["data"]["metrics"]

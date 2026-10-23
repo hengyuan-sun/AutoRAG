@@ -146,13 +146,13 @@
 - Routes: `GET/POST /api/v1/consumer-profiles`, `GET /api/v1/consumer-profiles/{id}`, `POST /api/v1/documents/{id}/consumer-preview`.
 - Experiment requests may include an optional `consumer_profile_id`; its immutable version/hash is copied into Trial data and config hash.
 
-- [ ] **Step 1: Write failing tests** `test_profile_rejects_unknown_selector_and_transform`, `test_profile_preview_emits_source_refs_for_each_value`, and `test_trial_pins_profile_version_and_hash`.
-- [ ] **Step 2: Run** `.venv\Scripts\python.exe -m pytest tests/test_consumer_profiles.py -q` and confirm the profile parser/evaluator is absent.
-- [ ] **Step 3: Implement profile validation and evaluation** over a validated DocumentIR using explicit traversal; distinguish missing, null, empty and unsupported values.
-- [ ] **Step 4: Seed the general retrieval and structured-review profiles** plus a WPS field alias example derived from reviewed `field_dictionary.json` and `procedure_fields.json`; keep source documents and production database writers out of the repository.
-- [ ] **Step 5: Implement workspace-scoped profile CRUD and preview routes** and pin profile snapshots in Trials.
-- [ ] **Step 6: Run** `.venv\Scripts\python.exe -m pytest tests/test_consumer_profiles.py tests/test_consumer_profile_api.py tests/test_api.py tests/test_service.py -q`.
-- [ ] **Step 7: Commit** profile validation, preview, fixtures and tests as `feat: add versioned consumer profiles`.
+- [x] **Step 1: Write failing tests** `test_profile_rejects_unknown_selector_and_transform`, `test_profile_preview_emits_source_refs_for_each_value`, and `test_trial_pins_profile_version_and_hash`.
+- [x] **Step 2: Run** `.venv\Scripts\python.exe -m pytest tests/test_consumer_profiles.py -q` and confirm the profile parser/evaluator is absent.
+- [x] **Step 3: Implement profile validation and evaluation** over a validated DocumentIR using explicit traversal; distinguish missing, null, empty and unsupported values.
+- [x] **Step 4: Seed the general retrieval and structured-review profiles** plus a WPS field alias example derived from reviewed `field_dictionary.json` and `procedure_fields.json`; keep source documents and production database writers out of the repository.
+- [x] **Step 5: Implement workspace-scoped profile CRUD and preview routes** and pin profile snapshots in Trials.
+- [x] **Step 6: Run** `.venv\Scripts\python.exe -m pytest tests/test_consumer_profiles.py tests/test_consumer_profile_api.py tests/test_api.py tests/test_service.py -q`.
+- [x] **Step 7: Commit** profile validation, preview, fixtures and tests as `feat: add versioned consumer profiles`.
 
 ### Task 6: Build the DocumentIR browser and field-profile editor
 

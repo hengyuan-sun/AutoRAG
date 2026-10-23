@@ -1,0 +1,51 @@
+{
+  "source_dictionaries": [
+    "documentProcessor/scenarios/wps_validation/field_dictionary.json",
+    "documentProcessor/scenarios/wps_validation/procedure_fields.json"
+  ],
+  "note": "字段别名按源项目字典中的稳定字段ID提取；样例不含源文件内容。实际项目中应结合IR条目类型和来源定位进一步缩小选择范围。",
+  "profile": {
+    "id": "wps-field-alias-example",
+    "name": "WPS字段别名示例",
+    "version": 1,
+    "schema_version": "1.5",
+    "fields": [
+      {
+        "key": "process_text",
+        "aliases": [
+          "process"
+        ],
+        "selector": "items[*].text",
+        "item_types": [
+          "paragraph"
+        ],
+        "cardinality": "many",
+        "transform": "identity"
+      },
+      {
+        "key": "weld_identifier_text",
+        "aliases": [
+          "weld_no"
+        ],
+        "selector": "items[*].text",
+        "item_types": [
+          "paragraph"
+        ],
+        "cardinality": "many",
+        "transform": "identity"
+      },
+      {
+        "key": "layer_text",
+        "aliases": [
+          "pass_or_layer"
+        ],
+        "selector": "items[*].text",
+        "item_types": [
+          "paragraph"
+        ],
+        "cardinality": "many",
+        "transform": "identity"
+      }
+    ]
+  }
+}
